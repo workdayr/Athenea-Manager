@@ -1,0 +1,21 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+// Modelo para RAG con soporte vectorial y control de acceso
+model Document {
+  id         String   @id @default(uuid())
+  title      String
+  content    String
+  embedding  Unsupported("vector(1536)")? // Embeddings estándar (OpenAI/OpenRouter)
+  roleAccess String[] @default([])        // Roles con acceso (ej. ['ADMIN', 'MANAGER'])
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
