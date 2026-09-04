@@ -1,0 +1,14 @@
+node_modules
+.next
+dist
+.git
+.env
+.env.*
+*.md
+.vscode
+.idea
+.agents
+.claude
+.cursor
+.devin
+coverage
