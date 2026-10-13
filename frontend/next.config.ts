@@ -1,8 +1,25 @@
 import type { NextConfig } from "next";
 
+// URL del backend BetterAuth. En desarrollo local apunta al backend en
+// localhost:3001; dentro de Docker Compose el servicio `web` debe definir
+// BACKEND_URL=http://api:3001 (ver docker-compose.yml).
+const backendURL = process.env.BACKEND_URL ?? "http://localhost:3001";
+
 const nextConfig: NextConfig = {
   /* config options here */
   output: "standalone",
+  // Proxy: el navegador solo habla con su mismo origen
+  // (http://localhost:3000/api/auth/*) y Next reenvia al backend lado
+  // servidor. Asi CORS, preflights y orígenes alternos (127.0.0.1, IPs de
+  // red) dejan de afectar al flujo de login/registro.
+  async rewrites() {
+    return [
+      {
+        source: "/api/auth/:path*",
+        destination: `${backendURL}/api/auth/:path*`,
+      },
+    ];
+  },
 };
 
 export default nextConfig;

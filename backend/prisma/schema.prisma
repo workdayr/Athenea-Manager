@@ -2,7 +2,9 @@ generator client {
   provider        = "prisma-client"
   previewFeatures = ["postgresqlExtensions"]
   binaryTargets   = ["native", "linux-musl-openssl-3.0.x"]
-  output          = "../generated/prisma"
+  // Dentro de src/ para que `nest build` (tsc, rootDir src) compile el
+  // cliente generado dentro de dist/ y resuelva en runtime.
+  output          = "../src/generated/prisma"
 }
 
 datasource db {
@@ -11,12 +13,100 @@ datasource db {
 }
 
 // Modelo para RAG con soporte vectorial y control de acceso
+
 model Document {
-  id         String   @id @default(uuid())
+  id         String                       @id @default(uuid())
   title      String
   content    String
   embedding  Unsupported("vector(1536)")? // Embeddings estándar (OpenAI/OpenRouter)
-  roleAccess String[] @default([])        // Roles con acceso (ej. ['ADMIN', 'MANAGER'])
+  roleAccess String[]                     @default([]) // Roles con acceso (ej. ['ADMIN', 'MANAGER'])
+  createdAt  DateTime                     @default(now())
+  updatedAt  DateTime                     @updatedAt
+}
+
+model User {
+  id             String    @id
+  name           String
+  email          String
+  emailVerified  Boolean   @default(false)
+  image          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  // RF-001: rol de plataforma. Por defecto STUDENT; el administrador lo
+  // reasigna despues. El cliente nunca puede fijarlo (input: false).
+  role           Role      @default(STUDENT)
+  // RF-010: contador de intentos fallidos y expiracion del bloqueo.
+  // Internos: no se exponen en respuestas (returned: false).
+  failedAttempts Int       @default(0)
+  lockedUntil    DateTime?
+  sessions       Session[]
+  accounts       Account[]
+
+  @@unique([email])
+  @@map("user")
+}
+
+/**
+ * Roles de plataforma (diccionario de datos, seccion 4.1 del documento
+ * de arquitectura). Los roles de proyecto (PI/Co-Investigador/Asistente)
+ * se modelaran en Project_User en una tarea posterior.
+ */
+enum Role {
+  STUDENT
+  PRINCIPAL_INVESTIGATOR
+  COORDINATOR
+  COMMITTEE
+  ADMINISTRATOR
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([token])
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  // Identificador del emisor de la cuenta (requerido por BetterAuth 1.7:
+  // "local:credential" para email+password). Sin esta columna el registro
+  // falla con 500 al crear la fila `account`.
+  issuer                String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
 }
