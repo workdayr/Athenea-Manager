@@ -5,12 +5,11 @@ services:
       dockerfile: Dockerfile
     ports:
       - "3001:3001"
-    environment:
-      DATABASE_URL: "postgresql://research_admin:${DB_PASSWORD}@postgres:5432/research_platform"
-      # NOTA: GOOGLE_CLIENT_ID/SECRET y AUTHORIZED_EMAIL_DOMAINS llegan por
-      # env_file (./backend/.env). No duplicarlos aqui: las entradas de
-      # `environment:` sobrescriben a las de `env_file` y una interpolacion
-      # vacia (${VAR:-}) borraria los valores reales.
+    # NOTA (2026-10-14): la BD es Neon (DATABASE_URL en backend/.env via
+    # env_file). NO definir DATABASE_URL en `environment:`: sobrescribiria
+    # al env_file y apuntaria al postgres local.
+    # El servicio `postgres` se conserva como BD local manual/respaldo;
+    # la app ya no lo usa.
     env_file:
       - ./backend/.env
     depends_on:

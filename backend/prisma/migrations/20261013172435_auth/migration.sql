@@ -5,7 +5,12 @@ CREATE EXTENSION IF NOT EXISTS "vector";
 CREATE TYPE "Role" AS ENUM ('STUDENT', 'PRINCIPAL_INVESTIGATOR', 'COORDINATOR', 'COMMITTEE', 'ADMINISTRATOR');
 
 -- CreateTable
-CREATE TABLE "Document" (
+-- NOTA (2026-10-14): `IF NOT EXISTS` porque algunas bases (p. ej. la
+-- instancia Neon con la integracion del diccionario de datos de
+-- 2026-10-14) ya traen "Document" con el mismo shape desde antes de
+-- aplicar esta migracion. Las bases que la registraron antes (BD local)
+-- no re-ejecutan este SQL.
+CREATE TABLE IF NOT EXISTS "Document" (
     "id" TEXT NOT NULL,
     "title" TEXT NOT NULL,
     "content" TEXT NOT NULL,
