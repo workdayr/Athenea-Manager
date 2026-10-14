@@ -20,3 +20,170 @@ model Document {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 }
+
+enum UserRole {
+  Principal_Investigator
+  Student
+  Coordinator
+  Committee
+  Administrator
+}
+
+enum ProjectStatus {
+  Proposed
+  Under_Review
+  Approved
+  Active
+  Completed
+  Closed
+  Rejected
+  Suspended
+}
+
+enum ProjectRole {
+  Principal_Investigator
+  Co_Investigator
+  Assistant
+}
+
+enum DocType {
+  hypothesis
+  abstract
+  methodology
+  rationale
+  results
+  ethics_approval
+}
+
+enum Visibility {
+  Team_only
+  Shared_with_administration
+}
+
+enum MilestoneStatus {
+  Pending
+  Completed
+  Delayed
+}
+
+enum ProductType {
+  journal_article
+  conference_presentation
+  software
+  patent
+  thesis
+}
+
+// ==========================================
+// MODELOS (Tablas de la base de datos)
+// ==========================================
+
+model Users {
+  user_id         Int       @id @default(autoincrement())
+  name            String    @db.VarChar(150)
+  mail            String    @unique
+  password        String    @db.VarChar(64)
+  role            UserRole
+  failed_attempts Int?      @default(0)
+
+  // Relaciones inversas
+  projectUsers    Project_User[]
+  milestones      Milestone[]
+  auditLogs       Audit_Log[]
+}
+
+model Announcement {
+  call_id         Int       @id @default(autoincrement())
+  title           String    @db.VarChar(200)
+  date_published  DateTime? @db.Timestamp()
+  deadline        DateTime  @db.Timestamp()
+  description     String    @db.Text
+  application_cap Int
+}
+
+model Project {
+  project_id      Int           @id @default(autoincrement())
+  title           String        @db.VarChar(300)
+  objectives      String        @db.Text
+  start_date      DateTime      @db.Timestamp()
+  end_date        DateTime      @db.Timestamp()
+  status          ProjectStatus @default(Proposed)
+  budget_enabled  Boolean       @default(false)
+  is_confidential Boolean
+
+  // Relaciones inversas
+  projectUsers    Project_User[]
+  documents       ProjectDocument[] 
+  milestones      Milestone[]
+  products        Product[]
+  expenses        Expense[]
+}
+
+model Project_User {
+  projectuser_id  Int         @id @default(autoincrement())
+  project_id      Int
+  user_id         Int
+  project_role    ProjectRole
+
+  // Llaves foráneas
+  project         Project     @relation(fields: [project_id], references: [project_id])
+  user            Users       @relation(fields: [user_id], references: [user_id])
+}
+
+// Nota: Se renombra a ProjectDocument para evitar conflicto con el modelo Document para RAG que ya tenías en tu archivo
+model ProjectDocument {
+  document_id     Int         @id @default(autoincrement())
+  project_id      Int
+  doc_type        DocType
+  visibility      Visibility
+  file_url        String
+  version         Int
+
+  // Llaves foráneas
+  project         Project     @relation(fields: [project_id], references: [project_id])
+}
+
+model Milestone {
+  milestone_id    Int             @id @default(autoincrement())
+  project_id      Int
+  name            String          @db.VarChar(150)
+  assignee_id     Int
+  due_date        DateTime        @db.Date
+  status          MilestoneStatus
+
+  // Llaves foráneas
+  project         Project         @relation(fields: [project_id], references: [project_id])
+  assignee        Users           @relation(fields: [assignee_id], references: [user_id])
+}
+
+model Product {
+  product_id      Int         @id @default(autoincrement())
+  project_id      Int
+  product_type    ProductType
+  url_doi         String
+
+  // Llaves foráneas
+  project         Project     @relation(fields: [project_id], references: [project_id])
+}
+
+model Expense {
+  expense_id          Int       @id @default(autoincrement())
+  project_id          Int
+  amount              Decimal   @db.Decimal(9, 2)
+  expense_description String    @db.VarChar(255)
+
+  // Llaves foráneas
+  project             Project   @relation(fields: [project_id], references: [project_id])
+}
+
+model Audit_Log {
+  log_id          Int       @id @default(autoincrement())
+  actor_id        Int
+  action          String    @db.VarChar(255)
+  target_id       String    @db.VarChar(255)
+  source_ip       String
+  timestamp       DateTime  @default(now()) @db.Timestamp()
+
+  // Llaves foráneas
+  actor           Users     @relation(fields: [actor_id], references: [user_id])
+}
