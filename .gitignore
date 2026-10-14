@@ -1,0 +1,4 @@
+# Variables locales con secretos (DB_PASSWORD para compose; los secretos
+# reales se configuran en backend/.env y frontend/.env, ya ignorados en
+# sus propios paquetes). Nunca commitear credenciales.
+.env

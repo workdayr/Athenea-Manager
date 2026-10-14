@@ -3,6 +3,12 @@
 /node_modules
 /build
 
+# Prisma Client generado (se regenera con `prisma generate`)
+/src/generated
+
+# Info incremental de TypeScript
+*.tsbuildinfo
+
 # Logs
 logs
 *.log

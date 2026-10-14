@@ -28,7 +28,8 @@ ENV NODE_ENV=production
 RUN addgroup -g 1001 -S nodejs && adduser -S nestjs -u 1001
 
 COPY --from=prod-deps /app/node_modules ./node_modules
-COPY --from=build /app/generated ./generated
+# El cliente Prisma generado vive en src/generated y ya esta compilado
+# dentro de dist/ (tsc, rootDir src), por lo que no se copia por separado.
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/package.json ./package.json
 
