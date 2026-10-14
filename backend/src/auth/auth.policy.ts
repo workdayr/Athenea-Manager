@@ -1,5 +1,6 @@
 import {
   ACCOUNT_LOCKOUT_MINUTES,
+  AUTHORIZED_EMAIL_DOMAINS_ENV_VAR,
   INSTITUTIONAL_EMAIL_DOMAIN,
   MAX_FAILED_LOGIN_ATTEMPTS,
 } from './auth.constants.js';
@@ -26,6 +27,55 @@ export function isInstitutionalEmail(email: unknown): boolean {
     return false;
   }
   return email.trim().toLowerCase().endsWith(INSTITUTIONAL_EMAIL_DOMAIN);
+}
+
+/**
+ * Normaliza la lista cruda de dominios autorizados (RF-015) a un arreglo de
+ * sufijos `@dominio` en minusculas, sin duplicados. Acepta entradas con o
+ * sin `@`, con espacios y en cualquier caso. Siempre incluye el dominio
+ * institucional aunque no venga en la lista.
+ */
+export function parseAuthorizedDomains(raw: unknown): string[] {
+  const domains = new Set<string>();
+  if (typeof raw === 'string') {
+    for (const part of raw.split(',')) {
+      const cleaned = part.trim().toLowerCase().replace(/^@+/, '');
+      if (cleaned) {
+        domains.add(`@${cleaned}`);
+      }
+    }
+  }
+  domains.add(INSTITUTIONAL_EMAIL_DOMAIN);
+  return [...domains];
+}
+
+/** Lee la lista de dominios autorizados desde el entorno (RF-015). */
+export function getAuthorizedEmailDomains(): string[] {
+  return parseAuthorizedDomains(
+    process.env[AUTHORIZED_EMAIL_DOMAINS_ENV_VAR],
+  );
+}
+
+/**
+ * Validacion de dominio autorizado (BR-005 + RF-015): institucional o uno de
+ * los dominios externos previamente autorizados. Se aplica al registro por
+ * formulario y por OAuth (donde el hook de `/sign-up/email` no llega).
+ */
+export function isAuthorizedEmail(
+  email: unknown,
+  domains: string[] = getAuthorizedEmailDomains(),
+): boolean {
+  if (typeof email !== 'string') {
+    return false;
+  }
+  const normalized = email.trim().toLowerCase();
+  return domains.some((domain) => normalized.endsWith(domain));
+}
+
+/** Mensaje en espanol para rechazos por dominio (se genera desde la lista). */
+export function unauthorizedDomainMessage(domains: string[]): string {
+  const names = domains.map((domain) => domain.replace(/^@+/, '')).join(', ');
+  return `Solo se aceptan correos de dominios autorizados: ${names}`;
 }
 
 /**

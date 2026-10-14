@@ -7,6 +7,10 @@ services:
       - "3001:3001"
     environment:
       DATABASE_URL: "postgresql://research_admin:${DB_PASSWORD}@postgres:5432/research_platform"
+      # NOTA: GOOGLE_CLIENT_ID/SECRET y AUTHORIZED_EMAIL_DOMAINS llegan por
+      # env_file (./backend/.env). No duplicarlos aqui: las entradas de
+      # `environment:` sobrescriben a las de `env_file` y una interpolacion
+      # vacia (${VAR:-}) borraria los valores reales.
     env_file:
       - ./backend/.env
     depends_on:

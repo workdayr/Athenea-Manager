@@ -2,7 +2,10 @@ import { betterAuth } from 'better-auth';
 import { type MemoryDB, memoryAdapter } from 'better-auth/adapters/memory';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { buildAuthOptions } from './auth.config.js';
-import { DEFAULT_USER_ROLE } from './auth.constants.js';
+import {
+  DEFAULT_USER_ROLE,
+  UNAUTHORIZED_DOMAIN_ERROR_CODE,
+} from './auth.constants.js';
 
 type AuthInstance = ReturnType<typeof betterAuth>;
 type MemoryRow = Record<string, unknown>;
@@ -220,5 +223,153 @@ describe('Sesion via Bearer (frontend localStorage)', () => {
       headers: new Headers({ authorization: `Bearer ${signIn.token}` }),
     });
     expect(session?.user.email).toBe(email);
+  });
+});
+
+describe('Politica de dominios en creacion por cualquier via (RF-015)', () => {
+  it('databaseHooks rechaza dominios no autorizados (ruta del callback OAuth)', async () => {
+    const auth = createTestAuth();
+    const ctx = await auth.$context;
+
+    // El callback OAuth crea el usuario via internalAdapter.createUser, que
+    // pasa por databaseHooks (el hook de /sign-up/email no lo cubre). El
+    // `code` es lo que permite al callback redirigir con ?error= en lugar
+    // de devolver el JSON crudo al navegador.
+    const failure = await ctx.internalAdapter
+      .createUser({
+        name: 'Externo',
+        email: 'externo@gmail.com',
+        emailVerified: false,
+      })
+      .then(
+        () => null,
+        (error: unknown) => error,
+      );
+    expect(failure).toMatchObject({ statusCode: 422 });
+    expect(
+      (failure as { body?: { code?: string } } | null)?.body?.code,
+    ).toBe(UNAUTHORIZED_DOMAIN_ERROR_CODE);
+  });
+
+  it('databaseHooks acepta dominios externos autorizados por entorno', async () => {
+    const previous = process.env.AUTHORIZED_EMAIL_DOMAINS;
+    process.env.AUTHORIZED_EMAIL_DOMAINS = 'socio.edu.mx';
+    try {
+      const auth = createTestAuth();
+      const ctx = await auth.$context;
+      const user = await ctx.internalAdapter.createUser({
+        name: 'Socio',
+        email: 'socio@socio.edu.mx',
+        emailVerified: true,
+      });
+      expect(user?.email).toBe('socio@socio.edu.mx');
+      expect((user as MemoryRow)?.role).toBe(DEFAULT_USER_ROLE);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AUTHORIZED_EMAIL_DOMAINS;
+      } else {
+        process.env.AUTHORIZED_EMAIL_DOMAINS = previous;
+      }
+    }
+  });
+});
+
+describe('Proveedor Google (RF-015)', () => {
+  const GOOGLE_ENV = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'] as const;
+
+  function setGoogleEnv(value: string | undefined) {
+    const previous = GOOGLE_ENV.map((key) => process.env[key]);
+    for (const key of GOOGLE_ENV) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+    return previous;
+  }
+
+  function restoreGoogleEnv(previous: (string | undefined)[]) {
+    GOOGLE_ENV.forEach((key, index) => {
+      if (previous[index] === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = previous[index];
+      }
+    });
+  }
+
+  it('la vinculacion silenciosa esta ACTIVADA (mismo email, sin confirmacion)', async () => {
+    // RF-015: Google con email existente vincula solo y entra directo al
+    // dashboard. Este test fija la decision de politica en la config
+    // resuelta (el flujo completo requeriria credenciales reales de Google).
+    const auth = createTestAuth();
+    const ctx = await auth.$context;
+    const linking = ctx.options.account?.accountLinking;
+    expect(linking?.enabled).toBe(true);
+    expect(linking?.allowDifferentEmails).not.toBe(true);
+    // Sin esto, BetterAuth rechaza vincular cuentas creadas por formulario
+    // (emailVerified=false, no hay flujo de verificacion) con
+    // `account_not_linked`: Google verifica el correo y el dominio
+    // institucional restringe el registro.
+    expect(linking?.requireLocalEmailVerified).toBe(false);
+    expect(linking?.trustedProviders).toContain('google');
+  });
+
+  it('sin credenciales el proveedor no existe (404)', async () => {
+    const previous = setGoogleEnv(undefined);
+    try {
+      const auth = createTestAuth();
+      await expect(
+        auth.api.signInSocial({
+          body: {
+            provider: 'google',
+            callbackURL: 'http://localhost:3000/dashboard',
+          },
+        }),
+      ).rejects.toThrowError(expect.objectContaining({ statusCode: 404 }));
+    } finally {
+      restoreGoogleEnv(previous);
+    }
+  });
+
+  it('con credenciales inicia el flujo OAuth (devuelve URL de Google)', async () => {
+    const previous = setGoogleEnv('test-id');
+    try {
+      const auth = createTestAuth();
+      const res = await auth.api.signInSocial({
+        body: {
+          provider: 'google',
+          callbackURL: 'http://localhost:3000/dashboard',
+        },
+      });
+      expect(res.redirect).toBe(true);
+      expect(res.url).toContain('accounts.google.com');
+      expect(res.url).toContain('client_id=test-id');
+    } finally {
+      restoreGoogleEnv(previous);
+    }
+  });
+
+  it('el registro por formulario con dominio externo autorizado funciona', async () => {
+    const previous = process.env.AUTHORIZED_EMAIL_DOMAINS;
+    process.env.AUTHORIZED_EMAIL_DOMAINS = 'socio.edu.mx';
+    try {
+      const auth = createTestAuth();
+      const res = await auth.api.signUpEmail({
+        body: {
+          name: 'Socio Form',
+          email: 'form@socio.edu.mx',
+          password: PASSWORD,
+        },
+      });
+      expect(res.user.email).toBe('form@socio.edu.mx');
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AUTHORIZED_EMAIL_DOMAINS;
+      } else {
+        process.env.AUTHORIZED_EMAIL_DOMAINS = previous;
+      }
+    }
   });
 });

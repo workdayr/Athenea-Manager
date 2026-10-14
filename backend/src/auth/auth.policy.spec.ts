@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
   ACCOUNT_LOCKOUT_MINUTES,
+  INSTITUTIONAL_EMAIL_DOMAIN,
   MAX_FAILED_LOGIN_ATTEMPTS,
 } from './auth.constants.js';
 import {
   evaluateLockout,
+  getAuthorizedEmailDomains,
+  isAuthorizedEmail,
   isInstitutionalEmail,
   nextStateAfterFailure,
   nextStateAfterSuccess,
+  parseAuthorizedDomains,
+  unauthorizedDomainMessage,
 } from './auth.policy.js';
 
 describe('isInstitutionalEmail (BR-005, scope UNIPOLI Durango)', () => {
@@ -41,6 +46,73 @@ describe('isInstitutionalEmail (BR-005, scope UNIPOLI Durango)', () => {
     expect(isInstitutionalEmail(null)).toBe(false);
     expect(isInstitutionalEmail(undefined)).toBe(false);
     expect(isInstitutionalEmail(123)).toBe(false);
+  });
+});
+
+describe('parseAuthorizedDomains / isAuthorizedEmail (RF-015)', () => {
+  it('siempre incluye el dominio institucional', () => {
+    expect(parseAuthorizedDomains('')).toContain(INSTITUTIONAL_EMAIL_DOMAIN);
+    expect(parseAuthorizedDomains(undefined)).toContain(
+      INSTITUTIONAL_EMAIL_DOMAIN,
+    );
+    expect(parseAuthorizedDomains('otro.edu.mx')).toEqual([
+      '@otro.edu.mx',
+      INSTITUTIONAL_EMAIL_DOMAIN,
+    ]);
+  });
+
+  it('normaliza formato: @, espacios, mayusculas y duplicados', () => {
+    expect(
+      parseAuthorizedDomains(
+        ' @Ejemplo.EDU.mx , ejemplo.edu.mx,,unipolidgo.edu.mx ',
+      ),
+    ).toEqual(['@ejemplo.edu.mx', INSTITUTIONAL_EMAIL_DOMAIN]);
+  });
+
+  it('isAuthorizedEmail acepta institucional y externos autorizados', () => {
+    const domains = ['@socio.edu.mx', INSTITUTIONAL_EMAIL_DOMAIN];
+    expect(isAuthorizedEmail('alumno@unipolidgo.edu.mx', domains)).toBe(true);
+    expect(isAuthorizedEmail('externo@socio.edu.mx', domains)).toBe(true);
+    expect(isAuthorizedEmail('Externo@SOCIO.EDU.MX ', domains)).toBe(true);
+  });
+
+  it('isAuthorizedEmail rechaza dominios no listados y suplantaciones', () => {
+    const domains = ['@socio.edu.mx', INSTITUTIONAL_EMAIL_DOMAIN];
+    expect(isAuthorizedEmail('alumno@gmail.com', domains)).toBe(false);
+    expect(isAuthorizedEmail('alumno@unipolidgo.edu.mx.evil.com', domains)).toBe(
+      false,
+    );
+    expect(isAuthorizedEmail('alumno@fakesocio.edu.mx', domains)).toBe(false);
+    expect(isAuthorizedEmail(null, domains)).toBe(false);
+  });
+
+  it('getAuthorizedEmailDomains lee el entorno con default institucional', () => {
+    const previous = process.env.AUTHORIZED_EMAIL_DOMAINS;
+    try {
+      delete process.env.AUTHORIZED_EMAIL_DOMAINS;
+      expect(getAuthorizedEmailDomains()).toEqual([
+        INSTITUTIONAL_EMAIL_DOMAIN,
+      ]);
+      process.env.AUTHORIZED_EMAIL_DOMAINS = 'socio.edu.mx';
+      expect(getAuthorizedEmailDomains()).toEqual([
+        '@socio.edu.mx',
+        INSTITUTIONAL_EMAIL_DOMAIN,
+      ]);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AUTHORIZED_EMAIL_DOMAINS;
+      } else {
+        process.env.AUTHORIZED_EMAIL_DOMAINS = previous;
+      }
+    }
+  });
+
+  it('unauthorizedDomainMessage lista los dominios en espanol', () => {
+    expect(
+      unauthorizedDomainMessage(['@socio.edu.mx', INSTITUTIONAL_EMAIL_DOMAIN]),
+    ).toBe(
+      'Solo se aceptan correos de dominios autorizados: socio.edu.mx, unipolidgo.edu.mx',
+    );
   });
 });
 

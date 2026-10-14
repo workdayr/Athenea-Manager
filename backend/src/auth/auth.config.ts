@@ -8,12 +8,15 @@ import {
   DEFAULT_USER_ROLE,
   MAX_PASSWORD_LENGTH,
   MIN_PASSWORD_LENGTH,
+  UNAUTHORIZED_DOMAIN_ERROR_CODE,
 } from './auth.constants.js';
 import {
   evaluateLockout,
-  isInstitutionalEmail,
+  getAuthorizedEmailDomains,
+  isAuthorizedEmail,
   nextStateAfterFailure,
   nextStateAfterSuccess,
+  unauthorizedDomainMessage,
   type LockoutState,
 } from './auth.policy.js';
 
@@ -32,6 +35,11 @@ const SIGN_IN_EMAIL_PATH = '/sign-in/email';
 export function buildAuthOptions(
   database: BetterAuthOptions['database'],
 ): BetterAuthOptions {
+  // RF-015: OAuth con Google Workspace. Solo se configura si hay
+  // credenciales (sin ellas el endpoint responde PROVIDER_NOT_FOUND).
+  const googleClientId = process.env.GOOGLE_CLIENT_ID;
+  const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
   return {
     appName: 'Athenea Manager',
     // URL base explicita (recomendado por BetterAuth; tambien se lee de
@@ -62,6 +70,63 @@ export function buildAuthOptions(
           bcrypt.hash(password, BCRYPT_COST_FACTOR),
         verify: ({ hash, password }: { hash: string; password: string }) =>
           bcrypt.compare(password, hash),
+      },
+    },
+    // RF-015: login con Google Workspace. Se pasa el objeto de opciones
+    // crudo (NO la factoria `google()`): BetterAuth 1.7 construye el
+    // proveedor internamente desde `socialProviders.<id>`.
+    // El callback del proveedor es `${baseURL}/api/auth/callback/google`
+    // (navegacion top-level, sin CORS).
+    // NOTA: no se usa la opcion `hd` del proveedor porque rechazaria los
+    // dominios externos autorizados de RF-015; la politica de dominios se
+    // aplica en `databaseHooks` (abajo) y en el hook de registro.
+    socialProviders:
+      googleClientId && googleClientSecret
+        ? {
+            google: {
+              clientId: googleClientId,
+              clientSecret: googleClientSecret,
+            },
+          }
+        : {},
+    account: {
+      // RF-015: vinculacion silenciosa ACTIVADA. Si el email de Google
+      // coincide con un usuario existente, la cuenta OAuth se vincula sola
+      // y entra directo al dashboard, sin pedir la contrasena.
+      // `allowDifferentEmails` queda en false (default): solo se vincula
+      // con el MISMO email. `trustedProviders` declara a Google como
+      // proveedor confiable.
+      // `requireLocalEmailVerified: false`: BetterAuth exige por defecto
+      // que el usuario LOCAL tenga el correo verificado antes de vincular
+      // OAuth. Como no hay flujo de verificacion de correo, ese flag es
+      // false en todos los registros por formulario y bloqueaba el login
+      // con Google (`account_not_linked`). Google Workspace verifica el
+      // correo en su lado (emailVerified desde el ID token) y el dominio
+      // institucional ya restringe el registro, por lo que el requisito
+      // local se relaja. La politica de dominios sigue aplicandose en
+      // `databaseHooks` (correos no autorizados -> 422 en el callback).
+      accountLinking: {
+        enabled: true,
+        trustedProviders: ['google'],
+        requireLocalEmailVerified: false,
+      },
+    },
+    // BR-005 + RF-015 en la creacion de usuarios por CUALQUIER via
+    // (formulario y OAuth; el hook de `/sign-up/email` no cubre el callback).
+    databaseHooks: {
+      user: {
+        create: {
+          before: async (user) => {
+            if (!isAuthorizedEmail(user.email)) {
+              throw new APIError('UNPROCESSABLE_ENTITY', {
+                code: UNAUTHORIZED_DOMAIN_ERROR_CODE,
+                message: unauthorizedDomainMessage(
+                  getAuthorizedEmailDomains(),
+                ),
+              });
+            }
+          },
+        },
       },
     },
     user: {
@@ -100,11 +165,13 @@ export function buildAuthOptions(
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
         if (ctx.path === SIGN_UP_EMAIL_PATH) {
-          // BR-005 (scope UNIPOLI Durango): solo @unipolidgo.edu.mx.
-          if (!isInstitutionalEmail(ctx.body?.email)) {
+          // BR-005 + RF-015: solo dominios autorizados (institucional por
+          // defecto, mas los externos configurados en AUTHORIZED_EMAIL_DOMAINS).
+          const domains = getAuthorizedEmailDomains();
+          if (!isAuthorizedEmail(ctx.body?.email, domains)) {
             throw new APIError('UNPROCESSABLE_ENTITY', {
-              message:
-                'Solo se aceptan correos institucionales',
+              code: UNAUTHORIZED_DOMAIN_ERROR_CODE,
+              message: unauthorizedDomainMessage(domains),
             });
           }
           return;
