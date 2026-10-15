@@ -9,6 +9,11 @@ function readStoredToken(): string {
   return window.localStorage.getItem(TOKEN_STORAGE_KEY) ?? '';
 }
 
+/** Token Bearer actual para llamadas directas al API (GraphQL/REST). */
+export function getStoredToken(): string {
+  return readStoredToken();
+}
+
 function storeToken(token: string | null): void {
   if (typeof window === 'undefined' || !token) {
     return;
