@@ -1,8 +1,14 @@
 import { UseGuards } from '@nestjs/common';
 import { Args, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { GraphQLError } from 'graphql';
+import { ROLES } from '../auth/roles.constants.js';
+import { Roles } from '../auth/roles.decorator.js';
+import { RolesGuard } from '../auth/roles.guard.js';
 import { CurrentUser } from '../projects/current-user.decorator.js';
-import { SessionGuard, type AuthenticatedUser } from '../projects/session.guard.js';
+import {
+  SessionGuard,
+  type AuthenticatedUser,
+} from '../projects/session.guard.js';
 import { remainingCallSlots } from './calls.policy.js';
 import {
   CallError,
@@ -54,11 +60,18 @@ function toGraphQLError(error: unknown): never {
   throw error;
 }
 
-/** US 2.2 / RF-018: publicacion y consulta de convocatorias. */
+/**
+ * US 2.2 / RF-018: publicacion y consulta de convocatorias.
+ *
+ * RF-001: las mutaciones administrativas declaran `@Roles(ADMINISTRATOR)`;
+ * `RolesGuard` corta antes de llegar al servicio. El servicio conserva
+ * su propio `requireAdmin` como defensa en profundidad.
+ */
 @Resolver(() => CallGql)
-@UseGuards(SessionGuard)
+@UseGuards(SessionGuard, RolesGuard)
 export class CallsResolver {
   @Mutation(() => CallGql)
+  @Roles(ROLES.ADMINISTRATOR)
   async createCall(
     @Args('input') input: CreateCallInput,
     @CurrentUser() user: AuthenticatedUser,
@@ -77,6 +90,7 @@ export class CallsResolver {
   }
 
   @Mutation(() => CallGql)
+  @Roles(ROLES.ADMINISTRATOR)
   async publishCall(
     @Args('callId', { type: () => Int }) callId: number,
     @CurrentUser() user: AuthenticatedUser,
@@ -90,6 +104,7 @@ export class CallsResolver {
   }
 
   @Mutation(() => CallGql)
+  @Roles(ROLES.ADMINISTRATOR)
   async closeCall(
     @Args('callId', { type: () => Int }) callId: number,
     @CurrentUser() user: AuthenticatedUser,
@@ -104,10 +119,13 @@ export class CallsResolver {
 
   /** Disparo manual del cierre por deadline (el job lo hace cada minuto). */
   @Mutation(() => Int)
+  @Roles(ROLES.ADMINISTRATOR)
   async closeExpiredCalls(
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<number> {
-    if (user.role !== 'ADMINISTRATOR') {
+    // Defense in depth: el guard ya bloquea, pero si alguien invoca el
+    // resolver directamente, esta validacion sigue vigente.
+    if (user.role !== ROLES.ADMINISTRATOR) {
       throw new GraphQLError(
         'Solo un Administrador puede ejecutar el cierre.',
         { extensions: { code: 'FORBIDDEN', field: null } },
