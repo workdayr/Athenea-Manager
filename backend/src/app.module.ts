@@ -1,9 +1,30 @@
 import { Module } from '@nestjs/common';
+import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
+import { GraphQLModule } from '@nestjs/graphql';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
+import { ProjectsModule } from './projects/projects.module.js';
 
 @Module({
-  imports: [],
+  imports: [
+    GraphQLModule.forRoot<ApolloDriverConfig>({
+      driver: ApolloDriver,
+      // Esquema en memoria (sin archivo generado en el repo).
+      autoSchemaFile: true,
+      path: '/graphql',
+      introspection: process.env['NODE_ENV'] !== 'production',
+      context: ({ req }: { req: unknown }) => ({ req }),
+      // RNF-010: nunca exponer stacktraces ni detalles internos.
+      formatError: (error) => ({
+        message: error.message,
+        extensions: {
+          code: (error.extensions?.['code'] as string) ?? 'INTERNAL_ERROR',
+          field: (error.extensions?.['field'] as string | null) ?? null,
+        },
+      }),
+    }),
+    ProjectsModule,
+  ],
   controllers: [AppController],
   providers: [AppService],
 })

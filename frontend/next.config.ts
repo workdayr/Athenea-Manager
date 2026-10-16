@@ -18,6 +18,16 @@ const nextConfig: NextConfig = {
         source: "/api/auth/:path*",
         destination: `${backendURL}/api/auth/:path*`,
       },
+      // US 2.1: GraphQL de dominio y uploads REST via mismo origen
+      // (evita CORS y reenvia el header Authorization al backend).
+      {
+        source: "/api/graphql",
+        destination: `${backendURL}/graphql`,
+      },
+      {
+        source: "/api/projects/:path*",
+        destination: `${backendURL}/projects/:path*`,
+      },
     ];
   },
 };

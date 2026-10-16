@@ -44,6 +44,7 @@ model User {
   lockedUntil    DateTime?
   sessions       Session[]
   accounts       Account[]
+  projectUsers   Project_User[]
 
   @@unique([email])
   @@map("user")
@@ -170,6 +171,8 @@ model Announcement {
   deadline        DateTime  @db.Timestamp()
   description     String    @db.Text
   application_cap Int
+
+  projects        Project[]
 }
 
 model Project {
@@ -181,8 +184,12 @@ model Project {
   status          ProjectStatus @default(Proposed)
   budget_enabled  Boolean       @default(false)
   is_confidential Boolean
+  // Convocatoria de origen (US 2.1: registro en respuesta a una call).
+  // Opcional para no bloquear registros fuera de convocatoria.
+  call_id         Int?
 
   // Relaciones inversas
+  call            Announcement?   @relation(fields: [call_id], references: [call_id])
   projectUsers    Project_User[]
   documents       ProjectDocument[] 
   milestones      Milestone[]
@@ -193,12 +200,13 @@ model Project {
 model Project_User {
   projectuser_id  Int         @id @default(autoincrement())
   project_id      Int
-  // Columna huerfana: la FK hacia Users se elimino con la tabla legacy.
-  user_id         Int
+  // PI / miembro del equipo (FK a user.id de BetterAuth, texto).
+  user_id         String
   project_role    ProjectRole
 
   // Llaves foráneas
   project         Project     @relation(fields: [project_id], references: [project_id])
+  user            User        @relation(fields: [user_id], references: [id], onDelete: Cascade)
 }
 
 // Nota: Se renombra a ProjectDocument para evitar conflicto con el modelo Document para RAG que ya tenías en tu archivo
@@ -209,6 +217,10 @@ model ProjectDocument {
   visibility      Visibility
   file_url        String
   version         Int
+  // Metadatos del archivo fisico (RNF-005: control de cuota por proyecto).
+  file_name       String?
+  file_size       Int?
+  uploaded_at     DateTime    @default(now()) @db.Timestamp()
 
   // Llaves foráneas
   project         Project     @relation(fields: [project_id], references: [project_id])
