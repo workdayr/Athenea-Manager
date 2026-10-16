@@ -171,8 +171,23 @@ model Announcement {
   deadline        DateTime  @db.Timestamp()
   description     String    @db.Text
   application_cap Int
+  // US 2.2 / RF-018: estado de la convocatoria y contador de
+  // postulaciones (el contador + SELECT ... FOR UPDATE serializan el cupo).
+  status            CallStatus @default(DRAFT)
+  application_count Int        @default(0)
 
   projects        Project[]
+}
+
+/**
+ * US 2.2 / RF-018: ciclo de vida de una convocatoria.
+ * DRAFT = creada por el admin, aun no visible. OPEN = recibe
+ * postulaciones. CLOSED = cerrada por deadline, cupo o manualmente.
+ */
+enum CallStatus {
+  DRAFT
+  OPEN
+  CLOSED
 }
 
 model Project {
