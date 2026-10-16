@@ -1,8 +1,15 @@
 import { UseGuards } from '@nestjs/common';
 import { Args, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { GraphQLError } from 'graphql';
+import { ROLES } from '../auth/roles.constants.js';
+import { Roles } from '../auth/roles.decorator.js';
+import { RolesGuard } from '../auth/roles.guard.js';
 import { CurrentUser } from './current-user.decorator.js';
-import { ProjectGql, ProjectStatusGql, RegisterProjectInput } from './projects.model.js';
+import {
+  ProjectGql,
+  ProjectStatusGql,
+  RegisterProjectInput,
+} from './projects.model.js';
 import {
   activeProjectCount,
   myProjects,
@@ -57,11 +64,16 @@ function toGraphQLError(error: unknown): never {
 /**
  * Operaciones de dominio de proyectos (RF-002, BR-001, BR-002).
  * Los archivos viajan por REST (`POST /projects/:id/documents`).
+ *
+ * RF-001: `RolesGuard` aplica autorizacion por rol donde se declare
+ * `@Roles()`. Las operaciones sin `@Roles()` requieren solo estar
+ * autenticado (`SessionGuard`).
  */
 @Resolver(() => ProjectGql)
-@UseGuards(SessionGuard)
+@UseGuards(SessionGuard, RolesGuard)
 export class ProjectsResolver {
   @Mutation(() => ProjectGql)
+  @Roles(ROLES.PRINCIPAL_INVESTIGATOR)
   async registerProject(
     @Args('input') input: RegisterProjectInput,
     @CurrentUser() user: AuthenticatedUser,

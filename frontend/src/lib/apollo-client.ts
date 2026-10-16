@@ -1,5 +1,66 @@
-import { ApolloClient, HttpLink, InMemoryCache, gql } from '@apollo/client';
+import {
+  ApolloClient,
+  HttpLink,
+  InMemoryCache,
+  from,
+  gql,
+} from '@apollo/client';
+import { onError } from '@apollo/client/link/error';
 import { getStoredToken } from './auth-client';
+
+/**
+ * RF-001: link de errores que detecta respuestas FORBIDDEN/UNAUTHENTICATED
+ * del backend y redirige a la pagina correspondiente.
+ *
+ * GraphQL siempre responde HTTP 200, asi que la unica forma de detectar
+ * un error de autorizacion es via `graphQLErrors[].extensions.code`
+ * (que es lo que emite `RolesGuard` desde el backend).
+ *
+ * NOTA: se usa `window.location.href` en lugar de `router.push` porque
+ * `errorLink` corre fuera de React (sin acceso a hooks). En un flujo de
+ * error de autorizacion, un full reload tambien limpia cache y estado
+ * residual, que es el comportamiento deseado.
+ *
+ * NOTA 2: Apollo Client 4 tipa el `error` de `onError` como `ErrorLike`,
+ * que no declara `graphQLErrors` ni `networkError` en su firma. En runtime
+ * es un `ApolloError` con ambos campos, asi que hacemos un narrowing
+ * manual para accederlos de forma segura.
+ */
+const errorLink = onError(({ error }) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const graphQLErrors = (
+    error as {
+      graphQLErrors?: ReadonlyArray<{
+        extensions?: { code?: string };
+      }>;
+    }
+  ).graphQLErrors;
+
+  const networkError = (error as { networkError?: unknown }).networkError;
+
+  if (graphQLErrors) {
+    for (const err of graphQLErrors) {
+      const code = err.extensions?.code;
+      if (code === 'FORBIDDEN') {
+        // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+        window.location.href = '/access-denied';
+        return;
+      }
+      if (code === 'UNAUTHENTICATED') {
+        // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+        window.location.href = '/login';
+        return;
+      }
+    }
+  }
+
+  if (networkError) {
+    console.error('[Apollo network error]', networkError);
+  }
+});
 
 /**
  * Cliente GraphQL contra el backend via proxy same-origin
@@ -8,13 +69,15 @@ import { getStoredToken } from './auth-client';
  * Se crea por operacion para leer el token vigente (post-login).
  */
 export function getApolloClient() {
+  const httpLink = new HttpLink({
+    uri: '/api/graphql',
+    headers: {
+      Authorization: `Bearer ${getStoredToken()}`,
+    },
+  });
+
   return new ApolloClient({
-    link: new HttpLink({
-      uri: '/api/graphql',
-      headers: {
-        Authorization: `Bearer ${getStoredToken()}`,
-      },
-    }),
+    link: from([errorLink, httpLink]),
     cache: new InMemoryCache(),
   });
 }
