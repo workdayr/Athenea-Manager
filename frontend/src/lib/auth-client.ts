@@ -34,8 +34,9 @@ export function clearStoredToken(): void {
  * hacia el backend con `rewrites()` (ver next.config.ts). Asi el navegador
  * nunca hace cross-origin: no hay preflights CORS que puedan fallar.
  * Usa Bearer tokens guardados en localStorage en lugar de cookies:
- * al crear una sesion el backend expone el token en el header
- * `set-auth-token` (plugin `bearer`) y aqui se persiste y reenvia
+ * al crear una sesion el backend devuelve el token (en el body
+ * `session.token` y, segun el plugin `bearer`, tambien en el header
+ * `set-auth-token`) y aqui se persiste y reenvia
  * en `Authorization: Bearer <token>` en cada peticion.
  *
  * NEXT_PUBLIC_API_URL solo se usa si se quiere apuntar directo al backend
@@ -48,8 +49,18 @@ export const authClient = createAuthClient({
       type: 'Bearer',
       token: readStoredToken,
     },
+    // Fuente del token: header `set-auth-token` y, como respaldo, el body
+    // `session.token` (el proxy de Next puede no reenviar el header).
+    // Sin este respaldo el localStorage quedaba con un token obsoleto y
+    // GraphQL respondia UNAUTHENTICATED aunque la sesion existiera.
     onSuccess: (ctx) => {
-      storeToken(ctx.response.headers.get('set-auth-token'));
+      const fromHeader = ctx.response.headers.get('set-auth-token');
+      const body = ctx.data as { session?: { token?: unknown } } | null;
+      const fromBody =
+        typeof body?.session?.token === 'string'
+          ? body.session.token
+          : null;
+      storeToken(fromHeader ?? fromBody ?? null);
     },
   },
 });

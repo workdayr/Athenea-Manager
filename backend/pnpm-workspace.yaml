@@ -1,5 +1,6 @@
 packages:
   - '.'
 allowBuilds:
+  '@apollo/protobufjs': set this to true or false
   '@prisma/engines': true
   prisma: true

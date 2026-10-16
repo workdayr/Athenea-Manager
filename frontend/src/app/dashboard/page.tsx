@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { authClient, clearStoredToken } from '@/lib/auth-client';
@@ -42,8 +43,14 @@ export default function DashboardPage() {
   }, [router]);
 
   async function handleSignOut() {
-    await authClient.signOut();
-    clearStoredToken();
+    // Limpiar el Bearer aunque el signOut falle: sin esto queda un token
+    // cadaver en localStorage y GraphQL responde UNAUTHENTICATED aunque
+    // BetterAuth ya haya revocado la sesion.
+    try {
+      await authClient.signOut();
+    } finally {
+      clearStoredToken();
+    }
     router.replace('/login');
   }
 
@@ -79,6 +86,22 @@ export default function DashboardPage() {
         >
           Cerrar sesión
         </button>
+        {(user?.role === 'COMMITTEE' || user?.role === 'COORDINATOR') && (
+          <Link
+            href="/proposal-evaluation"
+            className="mt-3 block w-full rounded-md bg-blue-600 px-3 py-2 text-center text-sm font-medium text-white hover:bg-blue-700"
+          >
+            Revisar propuestas
+          </Link>
+        )}
+        {user?.role === 'ADMINISTRATOR' && (
+          <Link
+            href="/proposal-evaluation/conflicts"
+            className="mt-3 block w-full rounded-md bg-blue-600 px-3 py-2 text-center text-sm font-medium text-white hover:bg-blue-700"
+          >
+            Revisar alertas de conflicto
+          </Link>
+        )}
       </section>
     </main>
   );
