@@ -1,5 +1,6 @@
 import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
+import { submitProposalToCall } from '../calls/calls.service.js';
 import { prisma } from '../db/prisma.js';
 import type { DocType } from '../generated/prisma/client.js';
 import {
@@ -66,17 +67,33 @@ export async function registerProject(
     fail(PROJECT_ERROR_CODES.VALIDATION_ERROR, first.message, 400, first.field);
   }
   if (data.callId !== undefined && data.callId !== null) {
-    const call = await prisma.announcement.findUnique({
-      where: { call_id: data.callId },
+    // US 2.2 / RF-018: la postulacion a convocatoria pasa por la
+    // transaccion con SELECT ... FOR UPDATE (cierre por deadline y cupo).
+    // BR-002 se valida ANTES para no consumir cupo de la convocatoria
+    // con un PI que ya alcanzo su tope.
+    const activeCount = await prisma.project_User.count({
+      where: {
+        user_id: user.id,
+        project_role: 'Principal_Investigator',
+        project: { status: { in: [...ACTIVE_PROJECT_STATUSES] } },
+      },
     });
-    if (!call) {
+    if (hasReachedProjectLimit(activeCount)) {
       fail(
-        PROJECT_ERROR_CODES.VALIDATION_ERROR,
-        'La convocatoria indicada no existe.',
-        400,
-        'callId',
+        PROJECT_ERROR_CODES.PI_LIMIT_EXCEEDED,
+        'Alcanzaste el limite de 3 proyectos activos (BR-002).',
+        403,
       );
     }
+    // Devuelve { result, closedByCap }; el resolver solo necesita el proyecto.
+    const { result } = await submitProposalToCall(user, {
+      title: data.title,
+      objectives: data.objectives,
+      startDate: data.startDate,
+      endDate: data.endDate,
+      callId: data.callId,
+    });
+    return result;
   }
   const activeCount = await prisma.project_User.count({
     where: {

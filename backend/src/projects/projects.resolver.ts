@@ -39,6 +39,18 @@ function toGraphQLError(error: unknown): never {
       extensions: { code: error.code, field: error.field ?? null },
     });
   }
+  // US 2.2: registerProject delega a calls.service, que lanza CallError
+  // (misma forma: code/message/httpStatus/field).
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    typeof (error as { code?: unknown }).code === 'string'
+  ) {
+    const domain = error as { code: string; message: string; field?: string };
+    throw new GraphQLError(domain.message, {
+      extensions: { code: domain.code, field: domain.field ?? null },
+    });
+  }
   throw error;
 }
 

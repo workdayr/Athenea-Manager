@@ -3,6 +3,7 @@ import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
 import { GraphQLModule } from '@nestjs/graphql';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
+import { CallsModule } from './calls/calls.module.js';
 import { ProjectsModule } from './projects/projects.module.js';
 
 @Module({
@@ -24,6 +25,7 @@ import { ProjectsModule } from './projects/projects.module.js';
       }),
     }),
     ProjectsModule,
+    CallsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
