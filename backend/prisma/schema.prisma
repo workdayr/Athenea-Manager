@@ -45,6 +45,13 @@ model User {
   sessions       Session[]
   accounts       Account[]
   projectUsers   Project_User[]
+  // RF-019 / RF-017: vinculos de auditoria y evaluacion
+  // (Audit_Log.actor_id, Proposal_Evaluation.reviewer_id y
+  // Review_Conflict.reviewer_id/resolved_by apuntan a user.id).
+  auditLogs         Audit_Log[]
+  evaluations       Proposal_Evaluation[] @relation("EvaluationReviewer")
+  conflictReviews   Review_Conflict[]     @relation("ConflictReviewer")
+  resolvedConflicts Review_Conflict[]     @relation("ConflictResolver")
 
   @@unique([email])
   @@map("user")
@@ -210,6 +217,9 @@ model Project {
   milestones      Milestone[]
   products        Product[]
   expenses        Expense[]
+  // RF-019: historial formal de decisiones y alertas de conflicto (BR-011).
+  evaluations     Proposal_Evaluation[]
+  conflicts       Review_Conflict[]
 }
 
 model Project_User {
@@ -276,10 +286,66 @@ model Expense {
 
 model Audit_Log {
   log_id          Int       @id @default(autoincrement())
-  // Columna huerfana: la FK hacia Users se elimino con la tabla legacy.
-  actor_id        Int
+  // Actor de la accion auditada (RF-017): FK a user.id de BetterAuth.
+  actor_id        String
   action          String    @db.VarChar(255)
   target_id       String    @db.VarChar(255)
   source_ip       String
   timestamp       DateTime  @default(now()) @db.Timestamp()
+
+  // Llaves foráneas
+  actor           User      @relation(fields: [actor_id], references: [id])
+}
+
+// ==========================================
+// EVALUACION DE PROPUESTAS (RF-019, BR-011)
+// Decisiones formales del comite y alertas de
+// conflicto de interes familiar persistentes.
+// ==========================================
+
+enum EvaluationDecision {
+  Approved
+  Rejected
+  Revision_Required
+}
+
+enum ConflictStatus {
+  Pending
+  Cleared
+  Confirmed
+}
+
+model Proposal_Evaluation {
+  evaluation_id Int                @id @default(autoincrement())
+  project_id    Int
+  reviewer_id   String
+  decision      EvaluationDecision
+  justification String             @db.Text
+  created_at    DateTime           @default(now()) @db.Timestamp()
+
+  // Llaves foráneas
+  project       Project            @relation(fields: [project_id], references: [project_id], onDelete: Restrict, onUpdate: Cascade)
+  reviewer      User               @relation("EvaluationReviewer", fields: [reviewer_id], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([project_id])
+  @@index([reviewer_id])
+}
+
+model Review_Conflict {
+  conflict_id     Int            @id @default(autoincrement())
+  project_id      Int
+  reviewer_id     String
+  status          ConflictStatus @default(Pending)
+  detected_at     DateTime       @default(now()) @db.Timestamp()
+  resolved_at     DateTime?      @db.Timestamp()
+  resolved_by     String?
+  resolution_note String?        @db.Text
+
+  // Llaves foráneas
+  project         Project        @relation(fields: [project_id], references: [project_id], onDelete: Restrict, onUpdate: Cascade)
+  reviewer        User           @relation("ConflictReviewer", fields: [reviewer_id], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  resolver        User?          @relation("ConflictResolver", fields: [resolved_by], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([project_id, reviewer_id])
+  @@index([status])
 }
