@@ -1,42 +1,57 @@
 'use client';
 
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { AdminDashboard } from '@/components/dashboard/admin-dashboard';
+import { AppShell } from '@/components/dashboard/app-shell';
+import { Icon } from '@/components/dashboard/icons';
+import { ProjectDashboard } from '@/components/dashboard/project-dashboard';
 import { authClient, clearStoredToken } from '@/lib/auth-client';
-
-interface SessionUser {
-  name: string;
-  email: string;
-  role?: string;
-}
+import {
+  isInstitutionalRole,
+  toPlatformRole,
+  type DashboardUser,
+} from '@/lib/dashboard';
 
 /**
- * Vista temporal post-login para verificar el flujo de sesion.
- * Se reemplazara por los dashboards por rol en tareas posteriores.
+ * Punto de entrada posterior al login (UC-009 / RF-008).
+ *
+ * El shell y el contenido se eligen segun el rol de plataforma (RF-001):
+ * - Administración, coordinación y comité -> tablero institucional.
+ * - Investigador Principal y estudiantes -> panel de su proyecto.
  */
 export default function DashboardPage() {
   const router = useRouter();
-  const [user, setUser] = useState<SessionUser | null>(null);
+  const [user, setUser] = useState<DashboardUser | null>(null);
   const [checking, setChecking] = useState(true);
+  const [query, setQuery] = useState('');
 
   useEffect(() => {
     let active = true;
-    authClient.getSession().then(({ data }) => {
-      if (!active) {
-        return;
-      }
-      if (!data?.user) {
-        router.replace('/login');
-        return;
-      }
-      setUser({
-        name: data.user.name,
-        email: data.user.email,
-        role: (data.user as SessionUser).role,
+    authClient
+      .getSession()
+      .then(({ data }) => {
+        if (!active) {
+          return;
+        }
+        if (!data?.user) {
+          router.replace('/login');
+          return;
+        }
+        setUser({
+          name: data.user.name,
+          email: data.user.email,
+          role: toPlatformRole((data.user as { role?: unknown }).role),
+        });
+        setChecking(false);
+      })
+      .catch(() => {
+        // Sin backend disponible no hay sesion verificable: se vuelve al
+        // login en lugar de dejar el panel en estado de carga infinito.
+        if (active) {
+          router.replace('/login');
+        }
       });
-      setChecking(false);
-    });
     return () => {
       active = false;
     };
@@ -54,55 +69,43 @@ export default function DashboardPage() {
     router.replace('/login');
   }
 
-  if (checking && !user) {
+  if (checking || !user) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-50">
-        <p className="text-sm text-gray-600">Verificando sesión…</p>
+      <main className="flex min-h-screen items-center justify-center bg-surface">
+        <div className="flex flex-col items-center gap-3">
+          <span className="grid h-11 w-11 place-items-center rounded-xl bg-gradient-to-br from-brand-800 to-brand-500 text-white shadow-sm">
+            <Icon name="athenea" className="h-6 w-6" />
+          </span>
+          <p className="text-sm text-muted">Verificando sesión…</p>
+        </div>
       </main>
     );
   }
 
+  const institutional = isInstitutionalRole(user.role);
+
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
-      <section className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
-        <p className="text-sm text-gray-600">Sesión iniciada como</p>
-        <h1 className="mt-1 text-2xl font-semibold text-gray-900">
-          {user?.name}
-        </h1>
-        <dl className="mt-4 space-y-2 text-sm">
-          <div className="flex justify-between gap-4">
-            <dt className="text-gray-600">Correo</dt>
-            <dd className="font-medium text-gray-900">{user?.email}</dd>
-          </div>
-          <div className="flex justify-between gap-4">
-            <dt className="text-gray-600">Rol</dt>
-            <dd className="font-medium text-gray-900">{user?.role ?? '—'}</dd>
-          </div>
-        </dl>
-        <button
-          type="button"
-          onClick={handleSignOut}
-          className="mt-6 w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-        >
-          Cerrar sesión
-        </button>
-        {(user?.role === 'COMMITTEE' || user?.role === 'COORDINATOR') && (
-          <Link
-            href="/proposal-evaluation"
-            className="mt-3 block w-full rounded-md bg-blue-600 px-3 py-2 text-center text-sm font-medium text-white hover:bg-blue-700"
-          >
-            Revisar propuestas
-          </Link>
-        )}
-        {user?.role === 'ADMINISTRATOR' && (
-          <Link
-            href="/proposal-evaluation/conflicts"
-            className="mt-3 block w-full rounded-md bg-blue-600 px-3 py-2 text-center text-sm font-medium text-white hover:bg-blue-700"
-          >
-            Revisar alertas de conflicto
-          </Link>
-        )}
-      </section>
-    </main>
+    <AppShell
+      user={user}
+      activeId="panel"
+      searchQuery={query}
+      searchPlaceholder={
+        institutional
+          ? 'Búsqueda global FTS: proyectos, protocolos, comités...'
+          : 'Buscar en tareas, documentos y evidencias...'
+      }
+      onSearchChange={setQuery}
+      onSignOut={handleSignOut}
+    >
+      {institutional ? (
+        <AdminDashboard
+          user={user}
+          query={query}
+          onSearchChange={setQuery}
+        />
+      ) : (
+        <ProjectDashboard user={user} query={query} />
+      )}
+    </AppShell>
   );
 }
