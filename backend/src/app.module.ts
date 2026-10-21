@@ -6,6 +6,8 @@ import { AppService } from './app.service.js';
 import { CallsModule } from './calls/calls.module.js';
 import { ProposalEvaluationModule } from './proposal_evaluation/proposal-evaluation.module.js';
 import { ProjectsModule } from './projects/projects.module.js';
+import { TasksModule } from './tasks/tasks.module.js';
+import { MilestonesModule } from './milestones/milestones.module.js';
 
 @Module({
   imports: [
@@ -28,6 +30,8 @@ import { ProjectsModule } from './projects/projects.module.js';
     ProjectsModule,
     CallsModule,
     ProposalEvaluationModule,
+    TasksModule,
+    MilestonesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -94,6 +94,15 @@ export default function DashboardPage() {
             Revisar propuestas
           </Link>
         )}
+        {(user?.role === 'PRINCIPAL_INVESTIGATOR' ||
+          user?.role === 'STUDENT') && (
+          <Link
+            href="/planning"
+            className="mt-3 block w-full rounded-md bg-blue-600 px-3 py-2 text-center text-sm font-medium text-white hover:bg-blue-700"
+          >
+            Hitos y tareas del proyecto
+          </Link>
+        )}
         {user?.role === 'ADMINISTRATOR' && (
           <Link
             href="/proposal-evaluation/conflicts"

@@ -52,6 +52,9 @@ model User {
   evaluations       Proposal_Evaluation[] @relation("EvaluationReviewer")
   conflictReviews   Review_Conflict[]     @relation("ConflictReviewer")
   resolvedConflicts Review_Conflict[]     @relation("ConflictResolver")
+  // US 5.1: hitos y tareas asignados al usuario
+  assignedMilestones Milestone[] @relation("MilestoneAssignee")
+  assignedTasks      Task[]      @relation("TaskAssignee")
 
   @@unique([email])
   @@map("user")
@@ -255,13 +258,35 @@ model Milestone {
   milestone_id    Int             @id @default(autoincrement())
   project_id      Int
   name            String          @db.VarChar(150)
-  // Columna huerfana: la FK hacia Users se elimino con la tabla legacy.
-  assignee_id     Int
+  // US 5.1: responsable = user.id (texto, BetterAuth). Antes era Int huerfano.
+  assignee_id     String
   due_date        DateTime        @db.Date
   status          MilestoneStatus
 
   // Llaves foráneas
   project         Project         @relation(fields: [project_id], references: [project_id])
+  assignee        User            @relation("MilestoneAssignee", fields: [assignee_id], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  tasks           Task[]
+
+  @@index([project_id])
+  @@index([assignee_id])
+}
+
+// US 5.1: tarea asignada a un hito. El proyecto se deriva del hito.
+model Task {
+  task_id         Int             @id @default(autoincrement())
+  milestone_id    Int
+  name            String          @db.VarChar(150)
+  assignee_id     String
+  due_date        DateTime        @db.Date
+  status          MilestoneStatus
+
+  // Llaves foráneas
+  milestone       Milestone       @relation(fields: [milestone_id], references: [milestone_id], onDelete: Cascade, onUpdate: Cascade)
+  assignee        User            @relation("TaskAssignee", fields: [assignee_id], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([milestone_id])
+  @@index([assignee_id])
 }
 
 model Product {
