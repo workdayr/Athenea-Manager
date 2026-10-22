@@ -106,6 +106,30 @@ export interface RegisterProjectResult {
   };
 }
 
+export interface MyProjectSummary {
+  projectId: string;
+  title: string;
+  objectives: string;
+  startDate: string;
+  endDate: string;
+  status: string;
+  callId: number | null;
+}
+
+export const MY_PROJECTS_QUERY = gql`
+  query MyProjects {
+    myProjects {
+      projectId
+      title
+      objectives
+      startDate
+      endDate
+      status
+      callId
+    }
+  }
+`;
+
 /** Extrae el `extensions.code` del primer error GraphQL. */
 export function graphqlErrorCode(error: unknown): string | null {
   const extensions = (
