@@ -4,6 +4,7 @@ import { GraphQLModule } from '@nestjs/graphql';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { CallsModule } from './calls/calls.module.js';
+import { DocumentUploadModule } from './document_upload/document-upload.module.js';
 import { ProposalEvaluationModule } from './proposal_evaluation/proposal-evaluation.module.js';
 import { ProjectsModule } from './projects/projects.module.js';
 
@@ -28,6 +29,7 @@ import { ProjectsModule } from './projects/projects.module.js';
     ProjectsModule,
     CallsModule,
     ProposalEvaluationModule,
+    DocumentUploadModule,
   ],
   controllers: [AppController],
   providers: [AppService],

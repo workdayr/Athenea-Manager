@@ -146,6 +146,7 @@ enum DocType {
   rationale
   results
   ethics_approval
+  evidence
 }
 
 enum Visibility {

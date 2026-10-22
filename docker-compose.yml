@@ -4,7 +4,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     ports:
-      - "3001:3001"
+      - "3005:3001"
     # NOTA (2026-10-14): la BD es Neon (DATABASE_URL en backend/.env via
     # env_file). NO definir DATABASE_URL en `environment:`: sobrescribiria
     # al env_file y apuntaria al postgres local.
@@ -12,8 +12,15 @@ services:
     # la app ya no lo usa.
     env_file:
       - ./backend/.env
+    environment:
+      # Dentro de la red de Compose, `localhost` es el propio contenedor:
+      # clamd se alcanza por el nombre del servicio.
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: "3310"
     depends_on:
       postgres:
+        condition: service_healthy
+      clamav:
         condition: service_healthy
     restart: unless-stopped
 
@@ -22,7 +29,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "3000:3000"
+      - "3009:3000"
     environment:
       # El proxy /api/auth/* de Next (rewrites) reenvia aqui. Dentro de la
       # red de Compose el backend se alcanza por su nombre de servicio.
@@ -50,6 +57,28 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  clamav:
+    # Escaneo antivirus ClamAV via protocolo clamd INSTREAM (puerto 3310).
+    # Usado por backend/src/document_upload/antivirus.service.ts (RF-016,
+    # F-05: fail closed si no responde).
+    image: clamav/clamav:latest
+    ports:
+      - "3310:3310"
+    # Configuracion personalizada: StreamMaxLength 25M para permitir archivos
+    # de evidencia de hasta 25 MB (sin esto clamd rechaza todo con
+    # "INSTREAM size limit exceeded").
+    volumes:
+      - ./docker/clamav/clamd.conf:/etc/clamav/clamd.conf:ro
+    # ClamAV necesita descargar firmas al inicio; healthcheck via clamdscan.
+    healthcheck:
+      # Usa 'nc' (netcat) que viene nativo en Alpine, en lugar de bash
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 3310 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      # Aumentado a 3 minutos para dar tiempo a freshclam de bajar las firmas
+      start_period: 180s
 
 volumes:
   pgdata:
