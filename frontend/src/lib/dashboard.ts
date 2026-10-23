@@ -592,6 +592,10 @@ export interface DashboardDocument {
   status: 'Aprobado' | 'En revisión' | 'Vigente';
   /** Documentos reservados al PI y a la administración (RF-005). */
   piOnly?: boolean;
+  /** US 4.1: protocolo o aprobación de ética (no puede ser privado). */
+  mandatoryReview?: boolean;
+  /** US 4.1: el usuario actual puede cambiar la visibilidad. */
+  canChangeVisibility?: boolean;
 }
 
 export interface ProjectView {

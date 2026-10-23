@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { Icon } from './icons';
 import { KpiCard } from './kpi-card';
@@ -29,6 +30,12 @@ import {
   type ProjectView,
   type TaskStatus,
 } from '@/lib/dashboard';
+import {
+  documentTypeLabel,
+  fetchProjectDocuments,
+  formatFileSize,
+  type ProjectDocument,
+} from '@/lib/documents';
 import {
   getApolloClient,
   MY_PROJECTS_QUERY,
@@ -117,9 +124,45 @@ export function ProjectDashboard({
     () => visibleTasks(user.role, PROJECT_TASKS),
     [user.role],
   );
+
+  // US 4.1 / RF-005: documentos reales del proyecto seleccionado. Si el
+  // backend no responde se conserva la vista de ejemplo.
+  const realProjectId = realProject ? Number(realProject.projectId) : null;
+  const [documentsState, setDocumentsState] = useState<{
+    projectId: number;
+    rows: DashboardDocument[];
+  } | null>(null);
+
+  useEffect(() => {
+    if (realProjectId === null || Number.isNaN(realProjectId)) {
+      return;
+    }
+    let active = true;
+    fetchProjectDocuments(realProjectId)
+      .then((rows) => {
+        if (active) {
+          setDocumentsState({
+            projectId: realProjectId,
+            rows: rows.map(mapProjectDocument),
+          });
+        }
+      })
+      .catch(() => {
+        // Sin backend se conserva la vista de ejemplo para este proyecto.
+      });
+    return () => {
+      active = false;
+    };
+  }, [realProjectId]);
+
+  const realDocuments =
+    documentsState && documentsState.projectId === realProjectId
+      ? documentsState.rows
+      : null;
+
   const documents = useMemo(
-    () => visibleDocuments(user.role, PROJECT_DOCUMENTS),
-    [user.role],
+    () => realDocuments ?? visibleDocuments(user.role, PROJECT_DOCUMENTS),
+    [realDocuments, user.role],
   );
 
   const normalizedQuery = query.trim().toLowerCase();
@@ -556,13 +599,23 @@ export function ProjectDashboard({
             <span className="rounded-full border border-line bg-[#f8f9fd] px-2.5 py-1 text-[10px] font-medium text-muted">
               {filteredDocuments.length} documentos
             </span>
-            <span
-              className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 text-[10.5px] font-medium text-muted"
-              title="Repositorio documental completo: módulo pendiente de implementación"
-            >
-              <Icon name="folder" className="h-3.5 w-3.5" />
-              Ver repositorio
-            </span>
+            {realProject ? (
+              <Link
+                href={`/projects/${realProject.projectId}/documents`}
+                className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 text-[10.5px] font-medium text-brand-700 transition hover:bg-brand-50"
+              >
+                <Icon name="folder" className="h-3.5 w-3.5" />
+                Ver repositorio
+              </Link>
+            ) : (
+              <span
+                className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 text-[10.5px] font-medium text-muted"
+                title="Repositorio documental completo: módulo pendiente de implementación"
+              >
+                <Icon name="folder" className="h-3.5 w-3.5" />
+                Ver repositorio
+              </span>
+            )}
           </div>
         </div>
 
@@ -613,9 +666,10 @@ export function ProjectDashboard({
 
         <div className="border-t border-line px-5 py-3">
           <p className="text-[10.5px] leading-relaxed text-muted">
-            Los documentos reservados al Investigador Principal o a la
-            administración no se listan para el resto del equipo (RF-005). La
-            visibilidad se valida también en el backend en cada descarga.
+            La administración solo recibe los documentos compartidos; los
+            marcados como “Solo equipo” nunca salen del equipo del proyecto
+            (RF-005). Los documentos de revisión obligatoria siempre se
+            comparten.
           </p>
         </div>
       </section>
@@ -670,6 +724,24 @@ function mapRealProject(
       },
     ],
     isDemoIdentity: false,
+  };
+}
+
+/** US 4.1 / RF-005: adapta un documento real al modelo del dashboard. */
+function mapProjectDocument(document: ProjectDocument): DashboardDocument {
+  return {
+    id: `DOC-${document.documentId}`,
+    name: document.fileName ?? `Documento #${document.documentId}`,
+    type: documentTypeLabel(document.docType),
+    size: formatFileSize(document.fileSize),
+    uploadedAt: document.uploadedAt,
+    visibility:
+      document.visibility === 'SHARED_WITH_ADMINISTRATION'
+        ? 'Shared_with_administration'
+        : 'Team_only',
+    status: 'Vigente',
+    mandatoryReview: document.mandatoryReview,
+    canChangeVisibility: document.canChangeVisibility,
   };
 }
 
@@ -772,6 +844,11 @@ function DocumentRow({ document }: { document: DashboardDocument }) {
             </span>
             <span className="block text-[10px] text-muted">
               {document.id} · {document.size}
+              {document.mandatoryReview && (
+                <span className="ml-1.5 inline-flex rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-semibold text-amber-800">
+                  Revisión obligatoria
+                </span>
+              )}
             </span>
           </span>
         </span>
