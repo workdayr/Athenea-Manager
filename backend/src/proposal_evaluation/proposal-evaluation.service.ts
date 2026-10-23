@@ -1,4 +1,5 @@
 import { prisma } from '../db/prisma.js';
+import { getProjectWithTeamForEvaluation } from '../projects/projects.service.js';
 import type { AuthenticatedUser } from '../projects/session.guard.js';
 import type {
   ConflictStatus,
@@ -301,10 +302,8 @@ export async function submitProjectDecision(
       'justification',
     );
   }
-  const row = (await prisma.project.findUnique({
-    where: { project_id: data.projectId },
-    include: { projectUsers: { include: { user: true } } },
-  })) as unknown as ProjectRow | null;
+
+const row = (await getProjectWithTeamForEvaluation(data.projectId)) as unknown as ProjectRow | null;
   if (!row) {
     // throw directo (no fail()): TS solo estrecha tras un throw.
     throw new EvaluationError(
@@ -381,6 +380,7 @@ export async function submitProjectDecision(
       where: { project_id: data.projectId },
       data: { status: to as ProjectStatus },
     });
+    console.log(`[EMAIL MOCK] Notificando al PI que el proyecto ${data.projectId} ha sido evaluado como: ${data.decision}`);
     await tx.audit_Log.create({
       data: {
         actor_id: viewer.id,

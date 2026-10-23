@@ -119,6 +119,7 @@ export async function registerProject(
       end_date: data.endDate,
       call_id: data.callId ?? null,
       is_confidential: false,
+      status: 'Draft', 
       projectUsers: {
         create: { user_id: user.id, project_role: 'Principal_Investigator' },
       },
@@ -160,6 +161,11 @@ function uploadBaseDir(): string {
  * en estado Proposed. Valida PDF por Magic Numbers, 25 MB/archivo y
  * cuota de 500 MB/proyecto. Un archivo por tipo documental.
  */
+/**
+ * RF-002 + RF-016: adjunta uno de los 5 documentos obligatorios al proyecto
+ * Valida PDF por Magic Numbers, 25 MB/archivo y cuota de 500 MB/proyecto. 
+ * Un archivo por tipo documental.
+ */
 export async function uploadProjectDocument(
   user: AuthenticatedUser,
   projectId: number,
@@ -194,13 +200,16 @@ export async function uploadProjectDocument(
       403,
     );
   }
-  if ((project as { status: string }).status !== 'Proposed') {
+
+  // 🚨 CORRECCIÓN (Obs 8): Ahora el proyecto nace en 'Draft', no en 'Proposed'
+  if ((project as { status: string }).status !== 'Draft') {
     fail(
       PROJECT_ERROR_CODES.CONFLICT,
-      'El proyecto ya no acepta documentos de registro.',
+      'El proyecto ya no acepta documentos de registro (debe estar en Draft).',
       409,
     );
   }
+
   const duplicate = await prisma.projectDocument.findFirst({
     where: { project_id: projectId, doc_type: docType as DocType },
   });
@@ -241,10 +250,9 @@ export async function uploadProjectDocument(
   const fileName = `${docType}_v1_${Date.now()}.pdf`;
   const absolutePath = join(dir, fileName);
   await writeFile(absolutePath, file.buffer);
+
   try {
-    // RF-005: los 5 documentos de registro son de evaluacion obligatoria,
-    // siempre visibles para administracion.
-    return await prisma.projectDocument.create({
+    const createdDoc = await prisma.projectDocument.create({
       data: {
         project_id: projectId,
         doc_type: docType as DocType,
@@ -255,8 +263,33 @@ export async function uploadProjectDocument(
         file_size: file.size,
       },
     });
+
+    // 🚨 NUEVO (Obs 8): Si ya hay 5 documentos, pasa a Proposed
+    const docCount = await prisma.projectDocument.count({
+      where: { project_id: projectId },
+    });
+    
+    if (docCount >= 5) {
+      await prisma.project.update({
+        where: { project_id: projectId },
+        data: { status: 'Proposed' },
+      });
+    }
+
+    return createdDoc;
   } catch (error) {
     await unlink(absolutePath).catch(() => undefined);
     throw error;
   }
+}
+
+/** 
+ * Obs 6: Interfaz pública para que otros módulos (como Evaluation) 
+ * consulten proyectos sin acoplarse a Prisma.
+ */
+export async function getProjectWithTeamForEvaluation(projectId: number) {
+  return prisma.project.findUnique({
+    where: { project_id: projectId },
+    include: { projectUsers: { include: { user: true } } },
+  });
 }

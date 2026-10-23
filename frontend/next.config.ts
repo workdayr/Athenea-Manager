@@ -28,6 +28,11 @@ const nextConfig: NextConfig = {
         source: "/api/projects/:path*",
         destination: `${backendURL}/projects/:path*`,
       },
+      // US 5.2: Subida de evidencia de tareas (Milestones)
+      {
+        source: "/api/milestones/:path*",
+        destination: `${backendURL}/milestones/:path*`,
+      },
     ];
   },
 };

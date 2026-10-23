@@ -2,6 +2,8 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
+//import { useQuery } from '@apollo/client';
+import { useQuery } from '@apollo/client/react';
 import { Icon } from './icons';
 import { KpiCard } from './kpi-card';
 import { LifecycleFunnel } from './lifecycle-funnel';
@@ -41,6 +43,7 @@ import {
   MY_PROJECTS_QUERY,
   type MyProjectSummary,
 } from '@/lib/apollo-client';
+import { GET_MILESTONES_QUERY, uploadMilestoneEvidence } from '@/lib/milestones';
 
 type TaskFilter = 'all' | TaskStatus;
 
@@ -61,16 +64,19 @@ const PRIORITY_STYLES: Record<DashboardTask['priority'], string> = {
   Media: 'text-amber-700',
   Baja: 'text-muted',
 };
+interface GetMilestonesData {
+  projectMilestones: MilestoneData[];
+}
+interface MilestoneData {
+  milestoneId: number;
+  name: string;
+  status: string;
+  dueDate: string;
+}
 
 /**
  * Panel de proyecto para Investigador Principal y miembros del equipo
  * (UC-009 / RF-008).
- *
- * - La identidad del proyecto se toma de `myProjects` cuando existe.
- * - Tareas y documentos son datos de ejemplo mientras el backend expone
- *   esos endpoints (se indica con el chip "Datos de ejemplo").
- * - RF-001 / RF-005: el equipo solo ve sus tareas y los documentos que le
- *   corresponden; el presupuesto se reserva al PI.
  */
 export function ProjectDashboard({
   user,
@@ -82,6 +88,7 @@ export function ProjectDashboard({
   const [projects, setProjects] = useState<MyProjectSummary[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [taskFilter, setTaskFilter] = useState<TaskFilter>('all');
+  const [uploadingTask, setUploadingTask] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -96,8 +103,6 @@ export function ProjectDashboard({
         }
       })
       .catch(() => {
-        // Sin conexion se mantiene la vista de ejemplo: el panel sigue
-        // siendo util para revisar el diseno y las secciones disponibles.
         if (active) {
           setProjects([]);
         }
@@ -116,18 +121,39 @@ export function ProjectDashboard({
   const realProject = projects?.find(
     (project) => String(project.projectId) === activeId,
   );
-  const view = realProject
-    ? mapRealProject(realProject, user)
-    : DEMO_PROJECT;
-
-  const tasks = useMemo(
-    () => visibleTasks(user.role, PROJECT_TASKS),
-    [user.role],
-  );
-
-  // US 4.1 / RF-005: documentos reales del proyecto seleccionado. Si el
-  // backend no responde se conserva la vista de ejemplo.
+  const view = realProject ? mapRealProject(realProject, user) : DEMO_PROJECT;
+  
   const realProjectId = realProject ? Number(realProject.projectId) : null;
+
+  // US 5.2: Traer tareas reales del backend
+// 1. Agrega esta interfaz junto a MilestoneData (arriba del componente):
+
+
+// 2. Modifica el useQuery para que use la interfaz:
+const { data: tasksData, refetch: refetchTasks } = useQuery<GetMilestonesData>(GET_MILESTONES_QUERY, {
+  client: getApolloClient(),
+  variables: { projectId: realProjectId || 0 },
+  skip: !realProjectId,
+  fetchPolicy: 'network-only',
+});
+  // Mapear tareas reales o usar mocks si no hay backend
+  const tasks: DashboardTask[] = useMemo(() => {
+    if (tasksData?.projectMilestones) {
+      return tasksData.projectMilestones.map((m: MilestoneData)  => ({
+        id: `MS-${m.milestoneId}`,
+        title: m.name,
+        // Mapeamos 'Delayed' a 'Pending' visualmente si no está en TaskStatus
+        status: (m.status === 'Delayed' ? 'Pending' : m.status) as TaskStatus,
+        dueDate: m.dueDate,
+        assignee: 'me', // El backend ya filtra por usuario si es STUDENT
+        assigneeName: user.name,
+        phase: 'Ejecución',
+        priority: 'Media',
+      }));
+    }
+    return visibleTasks(user.role, PROJECT_TASKS);
+  }, [tasksData, user.role, user.name]);
+
   const [documentsState, setDocumentsState] = useState<{
     projectId: number;
     rows: DashboardDocument[];
@@ -204,6 +230,20 @@ export function ProjectDashboard({
   const riskCount = tasks.filter(
     (task) => task.status !== 'Completed' && daysUntil(task.dueDate) < 0,
   ).length;
+
+  const handleUploadEvidence = async (milestoneId: number, file: File) => {
+    setUploadingTask(`MS-${milestoneId}`);
+    try {
+      await uploadMilestoneEvidence(milestoneId, file);
+      alert('Evidencia subida y tarea completada con éxito.');
+      refetchTasks();
+    } catch (err: unknown) { // <--- CORREGIDO
+      const message = err instanceof Error ? err.message : 'Error al subir la evidencia';
+      alert(message);
+    } finally {
+      setUploadingTask(null);
+    }
+  };
 
   const kpis: InstitutionalKpi[] = [
     {
@@ -333,9 +373,6 @@ export function ProjectDashboard({
             <Icon name="eye" className="h-3 w-3" />
             Vista filtrada por rol: {ROLE_LABELS[user.role]} (RF-001)
           </span>
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-white px-2.5 py-1 text-[10.5px] font-medium text-muted">
-            Datos en caché (15 min)
-          </span>
         </div>
 
         <div className="mt-3 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
@@ -373,18 +410,15 @@ export function ProjectDashboard({
               type="button"
               onClick={handleExport}
               className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-900 px-3.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-800"
-              title="Exporta las tareas visibles en CSV (PDF/XLSX pendiente, RF-008)"
             >
               <Icon name="download" className="h-4 w-4" />
               Descargar reporte
-              <span className="text-[10px] font-medium text-white/70">
-                CSV
-              </span>
             </button>
           </div>
         </div>
       </header>
 
+      {/* ... (El resto del código de Objetivos, KPIs y Ciclo de Vida se mantiene igual) ... */}
       <section
         aria-labelledby="project-objectives-heading"
         className="rounded-xl border border-line bg-white p-5 shadow-[0_1px_2px_rgba(16,35,61,0.04)] lg:p-6"
@@ -550,7 +584,13 @@ export function ProjectDashboard({
 
           <ul className="mt-3 space-y-2">
             {filteredTasks.map((task) => (
-              <TaskRow key={task.id} task={task} userName={user.name} />
+              <TaskRow 
+                key={task.id} 
+                task={task} 
+                userName={user.name} 
+                onUpload={handleUploadEvidence}
+                uploading={uploadingTask === task.id}
+              />
             ))}
             {filteredTasks.length === 0 && (
               <li className="rounded-lg border border-line bg-[#f8f9fd] px-3 py-6 text-center text-[11.5px] text-muted">
@@ -727,7 +767,6 @@ function mapRealProject(
   };
 }
 
-/** US 4.1 / RF-005: adapta un documento real al modelo del dashboard. */
 function mapProjectDocument(document: ProjectDocument): DashboardDocument {
   return {
     id: `DOC-${document.documentId}`,
@@ -779,7 +818,18 @@ function TaskSummaryTile({
   );
 }
 
-function TaskRow({ task, userName }: { task: DashboardTask; userName: string }) {
+// 🚨 COMPONENTE ACTUALIZADO CON BOTÓN DE SUBIDA
+function TaskRow({ 
+  task, 
+  userName, 
+  onUpload, 
+  uploading 
+}: { 
+  task: DashboardTask; 
+  userName: string; 
+  onUpload: (id: number, file: File) => void; 
+  uploading: boolean; 
+}) {
   const due = formatDate(task.dueDate);
   const assignee =
     task.assignee === 'me'
@@ -818,13 +868,40 @@ function TaskRow({ task, userName }: { task: DashboardTask; userName: string }) 
         </p>
       </div>
 
-      <div className="shrink-0 text-right">
+      <div className="shrink-0 text-right flex flex-col items-end gap-1.5">
         <p className="text-[10px] text-muted">{due}</p>
         <span
-          className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[9.5px] font-semibold ${TASK_STATUS_STYLES[task.status]}`}
+          className={`inline-flex rounded-full border px-2 py-0.5 text-[9.5px] font-semibold ${TASK_STATUS_STYLES[task.status]}`}
         >
           {TASK_STATUS_LABELS[task.status]}
         </span>
+
+        {/* Botón de subir evidencia (solo si es una tarea real y no está completada) */}
+        {task.status !== 'Completed' && task.id.startsWith('MS-') && (
+          <div className="mt-1">
+            <input
+              type="file"
+              id={`file-${task.id}`}
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) onUpload(Number(task.id.replace('MS-', '')), file);
+                // Limpiar input para permitir subir el mismo archivo si se requiere
+                e.target.value = '';
+              }}
+              disabled={uploading}
+            />
+            <label
+              htmlFor={`file-${task.id}`}
+              className={`cursor-pointer inline-flex items-center gap-1 rounded border border-brand-200 bg-brand-50 px-2 py-1 text-[10px] font-medium text-brand-700 hover:bg-brand-100 transition ${
+                uploading ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
+            >
+              <Icon name="arrowUpRight" className="h-3 w-3" />
+              {uploading ? 'Subiendo...' : 'Evidencia'}
+            </label>
+          </div>
+        )}
       </div>
     </li>
   );
