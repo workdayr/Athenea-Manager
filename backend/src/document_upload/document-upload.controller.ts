@@ -12,6 +12,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { MAX_FILE_BYTES } from '../projects/projects.constants.js';
+import { ProjectReadOnlyError } from '../projects/project-write-guard.js';
 import type { AuthenticatedUser } from '../projects/session.guard.js';
 import { CurrentUser } from '../projects/current-user.decorator.js';
 import { SessionGuard } from '../projects/session.guard.js';
@@ -62,7 +63,10 @@ export class DocumentUploadController {
         req.ip ?? 'unknown',
       );
     } catch (error) {
-      if (error instanceof DocumentUploadError) {
+      if (
+        error instanceof DocumentUploadError ||
+        error instanceof ProjectReadOnlyError
+      ) {
         throw new HttpException(error.message, error.httpStatus);
       }
       throw error;

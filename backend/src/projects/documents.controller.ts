@@ -13,6 +13,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { CurrentUser } from './current-user.decorator.js';
 import { MAX_FILE_BYTES } from './projects.constants.js';
+import { ProjectReadOnlyError } from './project-write-guard.js';
 import {
   ProjectError,
   uploadProjectDocument,
@@ -60,7 +61,10 @@ export class DocumentsController {
         },
       );
     } catch (error) {
-      if (error instanceof ProjectError) {
+      if (
+        error instanceof ProjectError ||
+        error instanceof ProjectReadOnlyError
+      ) {
         throw new HttpException(error.message, error.httpStatus);
       }
       throw error;

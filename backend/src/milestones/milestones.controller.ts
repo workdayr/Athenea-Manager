@@ -27,7 +27,13 @@ export class MilestonesController {
         req.ip ?? 'unknown'
       );
     } catch (e: any) {
-      throw new HttpException(e.message, e.extensions?.code === 'FORBIDDEN' ? 403 : 400);
+      const status =
+        typeof e?.httpStatus === 'number'
+          ? e.httpStatus
+          : e.extensions?.code === 'FORBIDDEN'
+            ? 403
+            : 400;
+      throw new HttpException(e.message, status);
     }
   }
 }
