@@ -15,6 +15,7 @@ import {
   validatePdfUpload,
   validateRegisterProjectInput,
 } from './projects.policy.js';
+import { assertProjectWritable } from './project-write-guard.js';
 import type { AuthenticatedUser } from './session.guard.js';
 
 /** Error de dominio: se mapea a GraphQL (extensions.code) o a HTTP. */
@@ -222,6 +223,9 @@ export async function uploadProjectDocument(
       403,
     );
   }
+
+  // RF-020: el archivo institucional es inmutable.
+  assertProjectWritable(project as { is_read_only?: boolean | null });
 
   // 🚨 CORRECCIÓN (Obs 8): Ahora el proyecto nace en 'Draft', no en 'Proposed'
   if ((project as { status: string }).status !== 'Draft') {

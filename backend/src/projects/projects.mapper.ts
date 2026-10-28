@@ -19,6 +19,8 @@ export interface ProjectRow {
   status: string;
   call_id: number | null;
   budget_enabled?: boolean;
+  is_read_only?: boolean | null;
+  archived_at?: Date | null;
   call?: { title: string } | null;
   projectUsers?: Array<{
     project_role: string;
@@ -78,5 +80,7 @@ export function toProjectGql(
   ).length;
   project.budgetEnabled = row.budget_enabled ?? false;
   project.budgetSpent = budgetSpent;
+  project.isReadOnly = row.is_read_only === true;
+  project.archivedAt = row.archived_at ?? null;
   return project;
 }

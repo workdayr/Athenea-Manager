@@ -1,6 +1,7 @@
 import { prisma } from '../db/prisma.js';
 import type { Visibility } from '../generated/prisma/client.js';
 import { PROJECT_ERROR_CODES } from '../projects/projects.constants.js';
+import { assertProjectWritable } from '../projects/project-write-guard.js';
 import type { AuthenticatedUser } from '../projects/session.guard.js';
 import { visibilityChangeAuditAction } from './documents.constants.js';
 import {
@@ -133,6 +134,9 @@ export async function setDocumentVisibility(
       403,
     );
   }
+
+  // RF-020: el archivo institucional es inmutable.
+  assertProjectWritable(project as { is_read_only?: boolean | null });
 
   const document = await prisma.projectDocument.findFirst({
     where: { document_id: documentId, project_id: projectId },

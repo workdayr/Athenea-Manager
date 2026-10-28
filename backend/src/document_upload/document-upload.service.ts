@@ -6,6 +6,7 @@ import type { AuthenticatedUser } from '../projects/session.guard.js';
 import {
   ACTIVE_PROJECT_STATUSES,
 } from '../projects/projects.constants.js';
+import { assertProjectWritable } from '../projects/project-write-guard.js';
 import {
   DOCUMENT_ERROR_CODES,
   documentErrorMessage,
@@ -105,6 +106,8 @@ export async function uploadEvidenceDocument(
   if (!project) {
     fail(DOCUMENT_ERROR_CODES.NOT_FOUND, 'El proyecto no existe.', 404);
   }
+  // RF-020: un proyecto archivado no admite nuevas evidencias.
+  assertProjectWritable(project as { is_read_only?: boolean | null });
   if (
     !(ACTIVE_PROJECT_STATUSES as readonly string[]).includes(
       (project as { status: string }).status,

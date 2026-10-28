@@ -35,6 +35,8 @@ export const DOCUMENT_ERROR_CODES = {
   FORBIDDEN: 'FORBIDDEN',
   NOT_FOUND: 'NOT_FOUND',
   CONFLICT: 'CONFLICT',
+  /** RF-020: el proyecto esta archivado en solo lectura. */
+  PROJECT_READ_ONLY: 'PROJECT_READ_ONLY',
 } as const;
 
 /** Accion de auditoria al subir un documento de evidencia (RF-017). */
@@ -55,6 +57,8 @@ export function documentErrorMessage(code: string): string {
       return 'El servicio de analisis antivirus no esta disponible. Intenta de nuevo.';
     case DOCUMENT_ERROR_CODES.CONFLICT:
       return 'Ya existe un documento de evidencia con este nombre para el proyecto.';
+    case DOCUMENT_ERROR_CODES.PROJECT_READ_ONLY:
+      return 'El proyecto esta archivado en modo solo lectura (RF-020).';
     default:
       return 'Error de validacion del archivo.';
   }

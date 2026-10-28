@@ -61,6 +61,19 @@ describe('toProjectGql', () => {
     expect(project.milestonesCompleted).toBe(1);
     expect(project.budgetEnabled).toBe(true);
     expect(project.budgetSpent).toBe(1750);
+    expect(project.isReadOnly).toBe(false);
+    expect(project.archivedAt).toBeNull();
+  });
+
+  it('expone el estado de archivo institucional (RF-020)', () => {
+    const archivedAt = new Date('2026-10-28T12:00:00.000Z');
+    const project = toProjectGql(
+      { ...BASE_ROW, is_read_only: true, archived_at: archivedAt },
+      PRINCIPAL_INVESTIGATOR,
+    );
+
+    expect(project.isReadOnly).toBe(true);
+    expect(project.archivedAt).toBe(archivedAt);
   });
 
   it('oculta el gasto a roles distintos del PI', () => {

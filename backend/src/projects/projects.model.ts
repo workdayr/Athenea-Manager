@@ -79,6 +79,14 @@ export class ProjectGql {
   /** Gasto real del proyecto; null para roles sin acceso presupuestal. */
   @Field(() => Float, { nullable: true })
   budgetSpent!: number | null;
+
+  /** RF-020: proyecto archivado; toda escritura queda bloqueada. */
+  @Field()
+  isReadOnly!: boolean;
+
+  /** RF-020: fecha en que se congelo el expediente. */
+  @Field(() => GraphQLISODateTime, { nullable: true })
+  archivedAt!: Date | null;
 }
 
 @InputType()

@@ -119,6 +119,27 @@ describe('setDocumentVisibility (US 4.1 / RF-005)', () => {
     expect(prisma.projectDocument.update).not.toHaveBeenCalled();
   });
 
+  it('rechaza cambios cuando el proyecto esta archivado (RF-020)', async () => {
+    (prisma.project.findUnique as any).mockResolvedValue({
+      ...projectRow,
+      is_read_only: true,
+    });
+
+    await expect(
+      setDocumentVisibility(
+        piUser,
+        10,
+        55,
+        'Shared_with_administration',
+        '10.0.0.5',
+      ),
+    ).rejects.toMatchObject({
+      code: DOCUMENT_VISIBILITY_ERROR_CODES.PROJECT_READ_ONLY,
+      httpStatus: 409,
+    });
+    expect(prisma.projectDocument.update).not.toHaveBeenCalled();
+  });
+
   it('rechaza cambios cuando el proyecto esta rechazado', async () => {
     (prisma.project.findUnique as any).mockResolvedValue({
       ...projectRow,
