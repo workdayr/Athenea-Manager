@@ -8,6 +8,8 @@ export const GET_MILESTONES_QUERY = gql`
       name
       dueDate
       status
+      assigneeId
+      assigneeName
     }
   }
 `;

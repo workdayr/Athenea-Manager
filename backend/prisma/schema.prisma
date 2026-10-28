@@ -225,6 +225,11 @@ model Project {
   // RF-019: historial formal de decisiones y alertas de conflicto (BR-011).
   evaluations     Proposal_Evaluation[]
   conflicts       Review_Conflict[]
+
+  // RF-008 / RF-013: indices para el dashboard institucional.
+  @@index([status])
+  @@index([start_date, end_date])
+  @@index([call_id])
 }
 
 model Project_User {
@@ -237,6 +242,10 @@ model Project_User {
   // Llaves foráneas
   project         Project     @relation(fields: [project_id], references: [project_id])
   user            User        @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  // RF-008: consultas de PI y de investigadores activos por proyecto.
+  @@index([project_id, project_role])
+  @@index([user_id])
 }
 
 model ProjectDocument {
@@ -255,6 +264,9 @@ model ProjectDocument {
   project         Project     @relation(fields: [project_id], references: [project_id])
   // NUEVO: Relación inversa
   milestone       Milestone?  @relation(fields: [milestone_id], references: [milestone_id])
+
+  @@index([project_id])
+  @@index([milestone_id])
 }
 
 model Milestone {
@@ -271,6 +283,10 @@ model Milestone {
   assignee        User            @relation(fields: [assignee_id], references: [id], onDelete: Cascade)
   // NUEVO: Relación con la evidencia
   documents       ProjectDocument[]
+
+  // RF-006 / RF-008: hitos por proyecto y deteccion de retrasos.
+  @@index([project_id, status, due_date])
+  @@index([assignee_id])
 }
 
 model Product {
@@ -281,6 +297,9 @@ model Product {
 
   // Llaves foráneas
   project         Project     @relation(fields: [project_id], references: [project_id])
+
+  // RF-008: productividad cientifica por proyecto.
+  @@index([project_id])
 }
 
 model Expense {
@@ -288,9 +307,15 @@ model Expense {
   project_id          Int
   amount              Decimal   @db.Decimal(9, 2)
   expense_description String    @db.VarChar(255)
+  // RF-008: permite filtrar el presupuesto ejercido por el rango del
+  // dashboard. Los registros existentes se backfillean con la fecha de
+  // inicio del proyecto en la migracion.
+  expense_date        DateTime  @default(now()) @db.Date
 
   // Llaves foráneas
   project             Project   @relation(fields: [project_id], references: [project_id])
+
+  @@index([project_id, expense_date])
 }
 
 model Audit_Log {
@@ -338,6 +363,7 @@ model Proposal_Evaluation {
 
   @@index([project_id])
   @@index([reviewer_id])
+  @@index([created_at])
 }
 
 model Review_Conflict {

@@ -198,6 +198,17 @@ export function submitProposalToCall(
               },
             },
           },
+          include: {
+            call: { select: { title: true } },
+            projectUsers: {
+              select: {
+                project_role: true,
+                user: { select: { name: true } },
+              },
+            },
+            milestones: { select: { status: true } },
+            expenses: { select: { amount: true } },
+          },
         }),
     );
   });

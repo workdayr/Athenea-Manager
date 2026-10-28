@@ -13,7 +13,20 @@ export class MilestonesService {
     if (user.role === 'STUDENT') {
       where.assignee_id = user.id;
     }
-    return prisma.milestone.findMany({ where });
+    const rows = await prisma.milestone.findMany({
+      where,
+      include: { assignee: { select: { name: true } } },
+    });
+    // GraphQL expone camelCase; Prisma devuelve columnas snake_case.
+    return rows.map((row) => ({
+      milestoneId: row.milestone_id,
+      projectId: row.project_id,
+      name: row.name,
+      assigneeId: row.assignee_id,
+      assigneeName: row.assignee.name,
+      dueDate: row.due_date,
+      status: row.status,
+    }));
   }
 
   // US 5.2: Subir evidencia y completar (Transaccional)

@@ -8,9 +8,6 @@ import { Icon } from './icons';
 import { KpiCard } from './kpi-card';
 import { LifecycleFunnel } from './lifecycle-funnel';
 import {
-  DEMO_PROJECT,
-  PROJECT_DOCUMENTS,
-  PROJECT_TASKS,
   ROLE_LABELS,
   STATUS_LABELS,
   TASK_STATUS_LABELS,
@@ -23,8 +20,6 @@ import {
   projectLifecycle,
   progressFromPeriod,
   shortPeriod,
-  visibleDocuments,
-  visibleTasks,
   type DashboardDocument,
   type DashboardTask,
   type DashboardUser,
@@ -59,11 +54,12 @@ const TASK_DOT_STYLES: Record<TaskStatus, string> = {
   Completed: 'border-emerald-300 bg-emerald-50 text-emerald-700',
 };
 
-const PRIORITY_STYLES: Record<DashboardTask['priority'], string> = {
-  Alta: 'text-red-600',
-  Media: 'text-amber-700',
-  Baja: 'text-muted',
+const TEAM_ROLE_LABELS: Record<string, string> = {
+  Principal_Investigator: 'Investigador Principal',
+  Co_Investigator: 'Co-Investigador',
+  Assistant: 'Asistente de investigación',
 };
+
 interface GetMilestonesData {
   projectMilestones: MilestoneData[];
 }
@@ -72,6 +68,8 @@ interface MilestoneData {
   name: string;
   status: string;
   dueDate: string;
+  assigneeId: string;
+  assigneeName: string;
 }
 
 /**
@@ -86,13 +84,21 @@ export function ProjectDashboard({
   query: string;
 }) {
   const [projects, setProjects] = useState<MyProjectSummary[] | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [taskFilter, setTaskFilter] = useState<TaskFilter>('all');
   const [uploadingTask, setUploadingTask] = useState<string | null>(null);
 
+  // El cliente se memoiza: `getApolloClient()` crea una instancia nueva en
+  // cada llamada y pasarla a `useQuery` en cada render provoca un bucle de
+  // re-renders ("Too many re-renders"). Tambien evita perder la cache de
+  // Apollo entre renders.
+  const client = useMemo(() => getApolloClient(), []);
+
   useEffect(() => {
     let active = true;
-    getApolloClient()
+    client
       .query<{ myProjects: MyProjectSummary[] }>({
         query: MY_PROJECTS_QUERY,
         fetchPolicy: 'network-only',
@@ -104,55 +110,53 @@ export function ProjectDashboard({
       })
       .catch(() => {
         if (active) {
-          setProjects([]);
+          setProjects(null);
+          setLoadError(true);
         }
       });
     return () => {
       active = false;
     };
-  }, []);
+  }, [client, reloadKey]);
 
-  const activeId =
-    selectedId ??
-    (projects && projects.length > 0
-      ? String(projects[0]?.projectId)
-      : 'demo');
+  const selectedProject =
+    projects?.find((project) => String(project.projectId) === selectedId) ??
+    projects?.[0] ??
+    null;
+  const realProjectId = selectedProject
+    ? Number(selectedProject.projectId)
+    : null;
 
-  const realProject = projects?.find(
-    (project) => String(project.projectId) === activeId,
+  // US 5.2: tareas reales del backend (hitos del proyecto seleccionado).
+  const { data: tasksData, refetch: refetchTasks } = useQuery<GetMilestonesData>(
+    GET_MILESTONES_QUERY,
+    {
+      client,
+      variables: { projectId: realProjectId || 0 },
+      skip: !realProjectId,
+      fetchPolicy: 'network-only',
+    },
   );
-  const view = realProject ? mapRealProject(realProject, user) : DEMO_PROJECT;
-  
-  const realProjectId = realProject ? Number(realProject.projectId) : null;
 
-  // US 5.2: Traer tareas reales del backend
-// 1. Agrega esta interfaz junto a MilestoneData (arriba del componente):
-
-
-// 2. Modifica el useQuery para que use la interfaz:
-const { data: tasksData, refetch: refetchTasks } = useQuery<GetMilestonesData>(GET_MILESTONES_QUERY, {
-  client: getApolloClient(),
-  variables: { projectId: realProjectId || 0 },
-  skip: !realProjectId,
-  fetchPolicy: 'network-only',
-});
-  // Mapear tareas reales o usar mocks si no hay backend
   const tasks: DashboardTask[] = useMemo(() => {
-    if (tasksData?.projectMilestones) {
-      return tasksData.projectMilestones.map((m: MilestoneData)  => ({
-        id: `MS-${m.milestoneId}`,
-        title: m.name,
-        // Mapeamos 'Delayed' a 'Pending' visualmente si no está en TaskStatus
-        status: (m.status === 'Delayed' ? 'Pending' : m.status) as TaskStatus,
-        dueDate: m.dueDate,
-        assignee: 'me', // El backend ya filtra por usuario si es STUDENT
-        assigneeName: user.name,
-        phase: 'Ejecución',
-        priority: 'Media',
-      }));
+    if (!tasksData?.projectMilestones) {
+      return [];
     }
-    return visibleTasks(user.role, PROJECT_TASKS);
-  }, [tasksData, user.role, user.name]);
+    return tasksData.projectMilestones.map((milestone) => ({
+      id: `MS-${milestone.milestoneId}`,
+      title: milestone.name,
+      // El backend usa `Delayed`; la vista solo distingue tres estados.
+      status: (milestone.status === 'Delayed'
+        ? 'Pending'
+        : milestone.status) as TaskStatus,
+      dueDate: milestone.dueDate,
+      assignee: milestone.assigneeId === user.id ? 'me' : 'team',
+      assigneeName:
+        milestone.assigneeId === user.id
+          ? user.name
+          : milestone.assigneeName,
+    }));
+  }, [tasksData, user.id, user.name]);
 
   const [documentsState, setDocumentsState] = useState<{
     projectId: number;
@@ -174,7 +178,7 @@ const { data: tasksData, refetch: refetchTasks } = useQuery<GetMilestonesData>(G
         }
       })
       .catch(() => {
-        // Sin backend se conserva la vista de ejemplo para este proyecto.
+        // Sin documentos accesibles se muestra el estado vacio.
       });
     return () => {
       active = false;
@@ -186,10 +190,7 @@ const { data: tasksData, refetch: refetchTasks } = useQuery<GetMilestonesData>(G
       ? documentsState.rows
       : null;
 
-  const documents = useMemo(
-    () => realDocuments ?? visibleDocuments(user.role, PROJECT_DOCUMENTS),
-    [realDocuments, user.role],
-  );
+  const documents = useMemo(() => realDocuments ?? [], [realDocuments]);
 
   const normalizedQuery = query.trim().toLowerCase();
 
@@ -201,7 +202,7 @@ const { data: tasksData, refetch: refetchTasks } = useQuery<GetMilestonesData>(G
       if (!normalizedQuery) {
         return true;
       }
-      return [task.id, task.title, task.phase]
+      return [task.id, task.title, task.assigneeName ?? '']
         .join(' ')
         .toLowerCase()
         .includes(normalizedQuery);
@@ -212,21 +213,45 @@ const { data: tasksData, refetch: refetchTasks } = useQuery<GetMilestonesData>(G
     if (!normalizedQuery) {
       return documents;
     }
-    return documents.filter((document) =>
-      [document.name, document.type, document.status]
+    return documents.filter((document) => {
+      const visibility =
+        document.visibility === 'Shared_with_administration'
+          ? 'Equipo + Administración'
+          : 'Solo equipo';
+      return [document.name, document.type, visibility]
         .join(' ')
         .toLowerCase()
-        .includes(normalizedQuery),
-    );
+        .includes(normalizedQuery);
+    });
   }, [documents, normalizedQuery]);
 
-  const counts = countByStatus(tasks);
   const lifecycle = useMemo(
-    () => projectLifecycle(view.status),
-    [view.status],
+    () => projectLifecycle(selectedProject?.status ?? 'Draft'),
+    [selectedProject?.status],
   );
+
+  if (projects === null) {
+    return loadError ? (
+      <ProjectDashboardError
+        onRetry={() => {
+          setLoadError(false);
+          setReloadKey((key) => key + 1);
+        }}
+      />
+    ) : (
+      <ProjectDashboardLoading />
+    );
+  }
+
+  if (!selectedProject) {
+    return <ProjectDashboardEmpty user={user} />;
+  }
+
+  const view = mapRealProject(selectedProject, user);
+  const activeId = String(selectedProject.projectId);
+  const counts = countByStatus(tasks);
   const hasBudget =
-    view.budget.assigned > 0 && user.role === 'PRINCIPAL_INVESTIGATOR';
+    view.budget.enabled && user.role === 'PRINCIPAL_INVESTIGATOR';
   const riskCount = tasks.filter(
     (task) => task.status !== 'Completed' && daysUntil(task.dueDate) < 0,
   ).length;
@@ -237,8 +262,9 @@ const { data: tasksData, refetch: refetchTasks } = useQuery<GetMilestonesData>(G
       await uploadMilestoneEvidence(milestoneId, file);
       alert('Evidencia subida y tarea completada con éxito.');
       refetchTasks();
-    } catch (err: unknown) { // <--- CORREGIDO
-      const message = err instanceof Error ? err.message : 'Error al subir la evidencia';
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : 'Error al subir la evidencia';
       alert(message);
     } finally {
       setUploadingTask(null);
@@ -276,18 +302,24 @@ const { data: tasksData, refetch: refetchTasks } = useQuery<GetMilestonesData>(G
       id: 'documents',
       label: 'Documentos del expediente',
       value: String(documents.length),
-      caption: `Última carga: ${formatDate(documents[0]?.uploadedAt ?? '')}`,
+      caption: documents[0]
+        ? `Última carga: ${formatDate(documents[0].uploadedAt)}`
+        : 'Sin documentos cargados',
       icon: 'doc',
       chips: [
         {
-          label: String(documents.filter((doc) => doc.status === 'Aprobado').length),
-          value: 'Aprobados',
+          label: String(
+            documents.filter(
+              (doc) => doc.visibility === 'Shared_with_administration',
+            ).length,
+          ),
+          value: 'Compartidos',
         },
         {
           label: String(
-            documents.filter((doc) => doc.status === 'En revisión').length,
+            documents.filter((doc) => doc.visibility === 'Team_only').length,
           ),
-          value: 'En revisión',
+          value: 'Solo equipo',
         },
       ],
       roles: [],
@@ -297,14 +329,8 @@ const { data: tasksData, refetch: refetchTasks } = useQuery<GetMilestonesData>(G
           id: 'budget',
           label: 'Presupuesto ejercido',
           value: formatCurrency(view.budget.spent),
-          caption: `de ${formatCurrency(view.budget.assigned)} asignados`,
+          caption: 'Gastos registrados en el proyecto',
           icon: 'wallet',
-          progress: {
-            prefix: 'Ejercicio',
-            highlight: 'MXN',
-            suffix: `${Math.round((view.budget.spent / view.budget.assigned) * 100)}%`,
-            percent: (view.budget.spent / view.budget.assigned) * 100,
-          },
           roles: [],
         }
       : {
@@ -325,18 +351,14 @@ const { data: tasksData, refetch: refetchTasks } = useQuery<GetMilestonesData>(G
     const header = [
       'ID',
       'Tarea',
-      'Fase',
       'Responsable',
-      'Prioridad',
       'Estado',
       'Vencimiento',
     ];
     const rows = tasks.map((task) => [
       task.id,
       task.title,
-      task.phase,
       task.assignee === 'me' ? user.name : (task.assigneeName ?? 'Equipo'),
-      task.priority,
       TASK_STATUS_LABELS[task.status],
       formatDate(task.dueDate),
     ]);
@@ -365,9 +387,7 @@ const { data: tasksData, refetch: refetchTasks } = useQuery<GetMilestonesData>(G
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-100 bg-brand-50 px-2.5 py-1 text-[10.5px] font-medium text-brand-800">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-            {view.isDemoIdentity
-              ? 'Vista de ejemplo (sin proyectos en tu cuenta)'
-              : 'Proyecto sincronizado con GraphQL'}
+            Proyecto sincronizado con GraphQL
           </span>
           <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-white px-2.5 py-1 text-[10.5px] font-medium text-muted">
             <Icon name="eye" className="h-3 w-3" />
@@ -396,20 +416,17 @@ const { data: tasksData, refetch: refetchTasks } = useQuery<GetMilestonesData>(G
               onChange={(event) => setSelectedId(event.target.value)}
               className="h-9 max-w-[280px] rounded-md border border-line bg-white px-3 pr-8 text-xs font-medium text-ink focus:border-brand-300 focus:outline-none"
             >
-              {(projects ?? []).map((project) => (
+              {projects.map((project) => (
                 <option key={project.projectId} value={String(project.projectId)}>
                   {project.title.slice(0, 60)}
                 </option>
               ))}
-              <option value="demo">
-                Vista de ejemplo
-                {projects && projects.length === 0 ? ' (sin proyectos)' : ''}
-              </option>
             </select>
             <button
               type="button"
               onClick={handleExport}
-              className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-900 px-3.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-800"
+              disabled={tasks.length === 0}
+              className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-900 px-3.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Icon name="download" className="h-4 w-4" />
               Descargar reporte
@@ -418,7 +435,6 @@ const { data: tasksData, refetch: refetchTasks } = useQuery<GetMilestonesData>(G
         </div>
       </header>
 
-      {/* ... (El resto del código de Objetivos, KPIs y Ciclo de Vida se mantiene igual) ... */}
       <section
         aria-labelledby="project-objectives-heading"
         className="rounded-xl border border-line bg-white p-5 shadow-[0_1px_2px_rgba(16,35,61,0.04)] lg:p-6"
@@ -470,7 +486,6 @@ const { data: tasksData, refetch: refetchTasks } = useQuery<GetMilestonesData>(G
             </p>
             <dl className="mt-3 space-y-2.5 text-[11.5px]">
               <MetaRow label="Investigador (PI)" value={view.pi} />
-              <MetaRow label="Departamento" value={view.department} />
               <MetaRow label="Periodo" value={view.period} />
               <MetaRow label="Convocatoria" value={view.call} />
             </dl>
@@ -594,7 +609,9 @@ const { data: tasksData, refetch: refetchTasks } = useQuery<GetMilestonesData>(G
             ))}
             {filteredTasks.length === 0 && (
               <li className="rounded-lg border border-line bg-[#f8f9fd] px-3 py-6 text-center text-[11.5px] text-muted">
-                No hay tareas que coincidan con el filtro seleccionado.
+                {tasks.length === 0
+                  ? 'El proyecto aún no tiene hitos o tareas registradas.'
+                  : 'No hay tareas que coincidan con el filtro seleccionado.'}
               </li>
             )}
           </ul>
@@ -639,30 +656,20 @@ const { data: tasksData, refetch: refetchTasks } = useQuery<GetMilestonesData>(G
             <span className="rounded-full border border-line bg-[#f8f9fd] px-2.5 py-1 text-[10px] font-medium text-muted">
               {filteredDocuments.length} documentos
             </span>
-            {realProject ? (
-              <Link
-                href={`/projects/${realProject.projectId}/documents`}
-                className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 text-[10.5px] font-medium text-brand-700 transition hover:bg-brand-50"
-              >
-                <Icon name="folder" className="h-3.5 w-3.5" />
-                Ver repositorio
-              </Link>
-            ) : (
-              <span
-                className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 text-[10.5px] font-medium text-muted"
-                title="Repositorio documental completo: módulo pendiente de implementación"
-              >
-                <Icon name="folder" className="h-3.5 w-3.5" />
-                Ver repositorio
-              </span>
-            )}
+            <Link
+              href={`/projects/${selectedProject.projectId}/documents`}
+              className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 text-[10.5px] font-medium text-brand-700 transition hover:bg-brand-50"
+            >
+              <Icon name="folder" className="h-3.5 w-3.5" />
+              Ver repositorio
+            </Link>
           </div>
         </div>
 
         <div className="mt-4 overflow-x-auto">
           <table className="w-full min-w-[760px] border-collapse text-left">
             <caption className="sr-only">
-              Documentos recientes del proyecto con tipo, visibilidad y estado
+              Documentos recientes del proyecto con tipo, visibilidad y acceso
             </caption>
             <thead>
               <tr className="border-y border-line bg-[#f8f9fd] text-[9.5px] font-semibold uppercase tracking-[0.08em] text-muted">
@@ -678,9 +685,6 @@ const { data: tasksData, refetch: refetchTasks } = useQuery<GetMilestonesData>(G
                 <th scope="col" className="px-3 py-2.5">
                   Visibilidad
                 </th>
-                <th scope="col" className="px-3 py-2.5">
-                  Estado
-                </th>
                 <th scope="col" className="px-5 py-2.5 text-right">
                   Acceso
                 </th>
@@ -693,10 +697,12 @@ const { data: tasksData, refetch: refetchTasks } = useQuery<GetMilestonesData>(G
               {filteredDocuments.length === 0 && (
                 <tr>
                   <td
-                    colSpan={6}
+                    colSpan={5}
                     className="px-5 py-10 text-center text-[12px] text-muted"
                   >
-                    No hay documentos que coincidan con la búsqueda.
+                    {documents.length === 0
+                      ? 'El proyecto aún no tiene documentos cargados.'
+                      : 'No hay documentos que coincidan con la búsqueda.'}
                   </td>
                 </tr>
               )}
@@ -711,6 +717,128 @@ const { data: tasksData, refetch: refetchTasks } = useQuery<GetMilestonesData>(G
             (RF-005). Los documentos de revisión obligatoria siempre se
             comparten.
           </p>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ProjectDashboardLoading() {
+  return (
+    <div className="space-y-6" aria-busy="true" aria-live="polite">
+      <div className="space-y-2">
+        <span className="block h-2.5 w-40 animate-pulse rounded bg-[#e8edf7]" />
+        <span className="block h-8 w-64 animate-pulse rounded bg-[#e8edf7]" />
+        <span className="block h-3 w-full max-w-xl animate-pulse rounded bg-[#eef2fa]" />
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {[0, 1, 2, 3].map((item) => (
+          <div
+            key={item}
+            className="rounded-xl border border-line bg-white p-5 shadow-[0_1px_2px_rgba(16,35,61,0.04)]"
+          >
+            <span className="block h-2.5 w-24 animate-pulse rounded bg-[#e8edf7]" />
+            <span className="mt-4 block h-7 w-16 animate-pulse rounded bg-[#e8edf7]" />
+            <span className="mt-3 block h-2.5 w-32 animate-pulse rounded bg-[#eef2fa]" />
+          </div>
+        ))}
+      </div>
+      <div className="rounded-xl border border-line bg-white p-5 shadow-[0_1px_2px_rgba(16,35,61,0.04)] lg:p-6">
+        <span className="block h-3 w-48 animate-pulse rounded bg-[#e8edf7]" />
+        <span className="mt-4 block h-2.5 w-full animate-pulse rounded bg-[#eef2fa]" />
+        <span className="mt-2 block h-2.5 w-5/6 animate-pulse rounded bg-[#eef2fa]" />
+        <span className="mt-2 block h-2.5 w-2/3 animate-pulse rounded bg-[#eef2fa]" />
+      </div>
+      <p className="text-[11.5px] text-muted">
+        Cargando proyectos y tareas desde el servidor…
+      </p>
+    </div>
+  );
+}
+
+function ProjectDashboardError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="space-y-6">
+      <header>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted">
+          UNIPOLI · Vicerrectoría de I+D+I
+        </p>
+        <h1 className="mt-2 text-[30px] font-semibold leading-tight tracking-tight text-ink sm:text-[36px]">
+          Panel de Proyecto
+        </h1>
+      </header>
+
+      <section
+        role="alert"
+        className="rounded-xl border border-red-200 bg-red-50/60 p-8 text-center"
+      >
+        <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-red-100 text-red-700">
+          <Icon name="alert" className="h-6 w-6" />
+        </span>
+        <h2 className="mt-4 text-[15px] font-semibold text-ink">
+          No se pudieron cargar tus proyectos
+        </h2>
+        <p className="mx-auto mt-2 max-w-md text-[12.5px] leading-relaxed text-muted">
+          Revisa tu conexión e inténtalo de nuevo. Si el problema continúa,
+          contacta a la Vicerrectoría de I+D+I.
+        </p>
+        <button
+          type="button"
+          onClick={onRetry}
+          className="mt-5 inline-flex h-9 items-center gap-2 rounded-md bg-brand-900 px-3.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-800"
+        >
+          <Icon name="refresh" className="h-4 w-4" />
+          Reintentar
+        </button>
+      </section>
+    </div>
+  );
+}
+
+function ProjectDashboardEmpty({ user }: { user: DashboardUser }) {
+  const canRegister = user.role === 'PRINCIPAL_INVESTIGATOR';
+
+  return (
+    <div className="space-y-6">
+      <header>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted">
+          UNIPOLI · Vicerrectoría de I+D+I
+        </p>
+        <h1 className="mt-2 text-[30px] font-semibold leading-tight tracking-tight text-ink sm:text-[36px]">
+          Panel de Proyecto
+        </h1>
+        <p className="mt-1 max-w-2xl text-[13px] leading-relaxed text-muted">
+          Ciclo de investigación, tareas asignadas, objetivos y evidencia
+          documental en una sola vista.
+        </p>
+      </header>
+
+      <section className="rounded-xl border border-dashed border-line bg-white p-8 text-center shadow-[0_1px_2px_rgba(16,35,61,0.04)] lg:p-12">
+        <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-brand-50 text-brand-700">
+          <Icon name="folder" className="h-6 w-6" />
+        </span>
+        <h2 className="mt-4 text-[15px] font-semibold text-ink">
+          Aún no tienes proyectos asignados
+        </h2>
+        <p className="mx-auto mt-2 max-w-md text-[12.5px] leading-relaxed text-muted">
+          {canRegister
+            ? 'Registra tu primer proyecto para consultar objetivos, hitos, equipo y evidencia documental desde este panel.'
+            : 'Cuando el Investigador Principal te añada a un equipo de investigación, aquí verás tus tareas y el expediente del proyecto.'}
+        </p>
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5">
+          {canRegister && (
+            <Link
+              href="/projects/new"
+              className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-900 px-3.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-800"
+            >
+              <Icon name="register" className="h-4 w-4" />
+              Registrar proyecto
+            </Link>
+          )}
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-white px-2.5 py-1 text-[10.5px] font-medium text-muted">
+            <Icon name="eye" className="h-3 w-3" />
+            Vista filtrada por rol: {ROLE_LABELS[user.role]} (RF-001)
+          </span>
         </div>
       </section>
     </div>
@@ -733,37 +861,46 @@ function mapRealProject(
       ? `${project.objectives.slice(0, 257)}…`
       : project.objectives;
 
+  const milestoneProgress =
+    project.milestonesTotal > 0
+      ? Math.round(
+          (project.milestonesCompleted / project.milestonesTotal) * 100,
+        )
+      : null;
+
   return {
     id: code,
     title: project.title,
     description,
     objectives: objectives.length > 0 ? objectives : [project.objectives],
-    pi:
-      user.role === 'PRINCIPAL_INVESTIGATOR'
-        ? user.name
-        : 'No registrado para este usuario',
-    department: 'Sin departamento registrado',
+    pi: project.piName ?? 'No registrado',
     period: shortPeriod(project.startDate, project.endDate),
-    call:
-      project.callId !== null && project.callId !== undefined
-        ? `Convocatoria #${project.callId}`
-        : 'Sin convocatoria asociada',
+    call: project.callTitle ?? 'Sin convocatoria asociada',
     status: project.status,
     progress:
-      project.status === 'Completed'
+      milestoneProgress ??
+      (project.status === 'Completed'
         ? 100
-        : progressFromPeriod(project.startDate, project.endDate),
-    budget: { assigned: 0, spent: 0 },
-    team: [
-      {
-        name: user.name,
-        role:
-          user.role === 'PRINCIPAL_INVESTIGATOR'
-            ? 'Investigador Principal'
-            : 'Miembro del Equipo',
-      },
-    ],
-    isDemoIdentity: false,
+        : progressFromPeriod(project.startDate, project.endDate)),
+    budget: {
+      enabled: project.budgetEnabled,
+      spent: project.budgetSpent ?? 0,
+    },
+    team:
+      project.team.length > 0
+        ? project.team.map((member) => ({
+            name: member.name,
+            role: TEAM_ROLE_LABELS[member.role] ?? member.role,
+          }))
+        : [
+            {
+              name: user.name,
+              role:
+                user.role === 'PRINCIPAL_INVESTIGATOR'
+                  ? 'Investigador Principal'
+                  : 'Miembro del Equipo',
+            },
+          ],
   };
 }
 
@@ -778,7 +915,6 @@ function mapProjectDocument(document: ProjectDocument): DashboardDocument {
       document.visibility === 'SHARED_WITH_ADMINISTRATION'
         ? 'Shared_with_administration'
         : 'Team_only',
-    status: 'Vigente',
     mandatoryReview: document.mandatoryReview,
     canChangeVisibility: document.canChangeVisibility,
   };
@@ -861,10 +997,7 @@ function TaskRow({
           {task.title}
         </p>
         <p className="mt-0.5 text-[10px] text-muted">
-          {task.id} · {task.phase} · {assignee}
-          <span className={`ml-1.5 font-medium ${PRIORITY_STYLES[task.priority]}`}>
-            · {task.priority}
-          </span>
+          {task.id} · {assignee}
         </p>
       </div>
 
@@ -939,19 +1072,6 @@ function DocumentRow({ document }: { document: DashboardDocument }) {
           {document.visibility === 'Shared_with_administration'
             ? 'Equipo + Administración'
             : 'Solo equipo'}
-        </span>
-      </td>
-      <td className="px-3 py-3">
-        <span
-          className={`inline-flex rounded-full border px-2 py-0.5 text-[9.5px] font-semibold ${
-            document.status === 'Aprobado'
-              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-              : document.status === 'En revisión'
-                ? 'border-amber-200 bg-amber-50 text-amber-800'
-                : 'border-brand-200 bg-brand-50 text-brand-800'
-          }`}
-        >
-          {document.status}
         </span>
       </td>
       <td className="px-5 py-3 text-right">

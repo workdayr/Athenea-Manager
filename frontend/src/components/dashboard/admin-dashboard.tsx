@@ -1,45 +1,98 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@apollo/client/react';
 import { Icon } from './icons';
 import { KpiCard } from './kpi-card';
 import { LifecycleFunnel } from './lifecycle-funnel';
 import {
-  DEPARTMENT_SHARES,
   SLA_LABELS,
   STATUS_LABELS,
+  formatCurrency,
   formatDate,
-  institutionalLifecycle,
   initials,
-  visibleKpis,
-  visiblePriorityProjects,
+  institutionalLifecycle,
   type DashboardUser,
   type PriorityProject,
   type SlaStatus,
 } from '@/lib/dashboard';
+import {
+  COORDINATOR_DASHBOARD_QUERY,
+  PHASE_STATUSES,
+  buildDashboardKpis,
+  dashboardLifecycle,
+  mapDashboardProject,
+  statusShares,
+  type CoordinatorDashboardData,
+  type CoordinatorDashboardResult,
+  type ReportFiltersInput,
+} from '@/lib/reporting';
+import { getApolloClient, graphqlErrorCode } from '@/lib/apollo-client';
 
-const PAGE_SIZE = 5;
-
-/** Estado(s) de proyecto que corresponden a cada etapa del ciclo de vida. */
-const PHASE_STATUSES: Record<number, string[]> = {
-  1: ['Proposed'],
-  2: ['Under_Review'],
-  3: ['Approved', 'Rejected'],
-  4: ['Active', 'Suspended'],
-  5: ['Completed', 'Closed'],
-};
+const PAGE_SIZE = 10;
+const SEARCH_DEBOUNCE_MS = 300;
 
 const SLA_STYLES: Record<SlaStatus, string> = {
   on_track: 'border-brand-100 bg-[#eef2fb] text-brand-800',
   at_risk: 'border-red-200 bg-red-50 text-red-700',
   upcoming: 'border-line bg-[#f1f3f9] text-muted',
+  no_milestones: 'border-line bg-white text-muted',
 };
 
 const SLA_DOT: Record<SlaStatus, string> = {
   on_track: 'bg-brand-500',
   at_risk: 'bg-red-500',
   upcoming: 'bg-[#9aa5bb]',
+  no_milestones: 'bg-[#c6cddb]',
 };
+
+const TIME_FORMATTER = new Intl.DateTimeFormat('es-MX', {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+});
+
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) {
+    return '—';
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : TIME_FORMATTER.format(date);
+}
+
+function errorMessage(error: unknown): string {
+  const code = graphqlErrorCode(error);
+  if (code === 'REPORTING_UNAVAILABLE') {
+    return 'No se pudieron calcular las métricas del tablero. Intenta de nuevo en unos segundos.';
+  }
+  if (code === 'VALIDATION_ERROR') {
+    return 'Los filtros seleccionados no son válidos. Ajusta el periodo e intenta de nuevo.';
+  }
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return 'No se pudo cargar el tablero institucional.';
+}
+
+/** Ventana de paginas visible alrededor de la pagina actual. */
+function pageWindow(current: number, total: number): (number | 'gap')[] {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, index) => index + 1);
+  }
+  const pages = new Set<number>([1, total, current - 1, current, current + 1]);
+  const sorted = Array.from(pages)
+    .filter((page) => page >= 1 && page <= total)
+    .sort((a, b) => a - b);
+  const result: (number | 'gap')[] = [];
+  let previous = 0;
+  for (const page of sorted) {
+    if (previous > 0 && page - previous > 1) {
+      result.push('gap');
+    }
+    result.push(page);
+    previous = page;
+  }
+  return result;
+}
 
 /**
  * Tablero de Control Institucional (UC-009 / RF-008).
@@ -47,6 +100,9 @@ const SLA_DOT: Record<SlaStatus, string> = {
  * RF-001: los KPI, la tabla y el detalle presupuestal se filtran por rol.
  * El Comité solo ve propuestas en dictamen y no accede a cifras de
  * presupuesto; coordinación y administración ven el inventario completo.
+ *
+ * RF-008 / RNF-002: los datos provienen de `coordinatorDashboard`, que
+ * pagina del lado del servidor y cachea los cálculos durante 15 minutos.
  */
 export function AdminDashboard({
   user,
@@ -57,112 +113,161 @@ export function AdminDashboard({
   query: string;
   onSearchChange: (value: string) => void;
 }) {
-  const lifecycle = useMemo(() => institutionalLifecycle(), []);
+  const currentYear = new Date().getFullYear();
+  const [year, setYear] = useState(currentYear);
   const [phaseFilter, setPhaseFilter] = useState<number | null>(null);
-  const [department, setDepartment] = useState('all');
   const [status, setStatus] = useState('all');
   const [call, setCall] = useState('all');
   const [page, setPage] = useState(1);
-  const [year, setYear] = useState('2026');
+  const [search, setSearch] = useState('');
+  const client = useMemo(() => getApolloClient(), []);
 
-  const kpis = visibleKpis(user.role);
   const canSeeBudget =
     user.role === 'ADMINISTRATOR' || user.role === 'COORDINATOR';
 
-  const roleProjects = useMemo(
-    () => visiblePriorityProjects(user.role),
-    [user.role],
+  useEffect(() => {
+    // RF-008: evita una consulta por cada tecla; el debounce solo aplica a
+    // la busqueda de la tabla, no a los KPI (que ignoran ese filtro).
+    const timer = setTimeout(() => {
+      setSearch(query.trim());
+      setPage(1);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  const statuses = useMemo(() => {
+    const phaseStatuses = phaseFilter
+      ? (PHASE_STATUSES[phaseFilter] ?? [])
+      : null;
+    if (status !== 'all') {
+      return phaseStatuses
+        ? phaseStatuses.filter((item) => item === status)
+        : [status];
+    }
+    return phaseStatuses ?? [];
+  }, [phaseFilter, status]);
+
+  const requestedPage = page;
+  const filters: ReportFiltersInput = {
+    year,
+    page: requestedPage,
+    pageSize: PAGE_SIZE,
+    ...(call !== 'all' ? { callId: Number(call) } : {}),
+    ...(statuses.length > 0 ? { statuses } : {}),
+    ...(search ? { search } : {}),
+  };
+
+  const {
+    data: queryResult,
+    loading,
+    error: queryError,
+    refetch,
+  } = useQuery<CoordinatorDashboardResult>(COORDINATOR_DASHBOARD_QUERY, {
+    client,
+    variables: { filters },
+    fetchPolicy: 'network-only',
+    notifyOnNetworkStatusChange: true,
+    returnPartialData: false,
+  });
+
+  // Apollo Client 4 tipa `data` como DeepPartial porque la cache podria
+  // contener una respuesta incompleta. La consulta solicita todos los campos
+  // y `returnPartialData: false` garantiza respuestas completas, por lo que
+  // se restaura el tipo del contrato en este limite.
+  const data = (queryResult?.coordinatorDashboard ??
+    null) as CoordinatorDashboardData | null;
+  const error = queryError ? errorMessage(queryError) : null;
+
+  const metrics = data?.metrics ?? null;
+  const kpis = useMemo(
+    () => (metrics ? buildDashboardKpis(metrics, user.role, year) : []),
+    [metrics, user.role, year],
+  );
+  const shares = useMemo(
+    () => (metrics ? statusShares(metrics) : []),
+    [metrics],
+  );
+  const lifecycle = useMemo(
+    () => (metrics ? dashboardLifecycle(metrics) : institutionalLifecycle()),
+    [metrics],
+  );
+  const rows = useMemo(
+    () => (data?.projects ?? []).map(mapDashboardProject),
+    [data],
   );
 
-  const departments = useMemo(
-    () => unique(roleProjects.map((project) => project.department)),
-    [roleProjects],
-  );
-
-  const statuses = useMemo(
-    () => unique(roleProjects.map((project) => project.projectStatus)),
-    [roleProjects],
-  );
-
-  const calls = useMemo(
-    () =>
-      unique(
-        roleProjects.map((project) => project.call.split(' · ')[0] ?? project.call),
-      ),
-    [roleProjects],
-  );
-
-  const filtered = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    return roleProjects.filter((project) => {
-      if (phaseFilter) {
-        const allowed = PHASE_STATUSES[phaseFilter] ?? [];
-        if (!allowed.includes(project.projectStatus)) {
-          return false;
-        }
-      }
-      if (department !== 'all' && project.department !== department) {
-        return false;
-      }
-      if (status !== 'all' && project.projectStatus !== status) {
-        return false;
-      }
-      if (call !== 'all' && !project.call.startsWith(call)) {
-        return false;
-      }
-      if (!normalizedQuery) {
-        return true;
-      }
-      const haystack = [
-        project.id,
-        project.title,
-        project.pi,
-        project.department,
-        project.milestone,
-        project.call,
-      ]
-        .join(' ')
-        .toLowerCase();
-      return haystack.includes(normalizedQuery);
-    });
-  }, [roleProjects, query, phaseFilter, department, status, call]);
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const callOptions = data?.callOptions ?? [];
+  const totalFiltered = data?.totalFilteredProjects ?? 0;
+  const totalPages = Math.max(1, data?.totalPages ?? 1);
   const safePage = Math.min(page, totalPages);
-  const pageRows = filtered.slice(
-    (safePage - 1) * PAGE_SIZE,
-    safePage * PAGE_SIZE,
-  );
+  const pageStart = totalFiltered === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
+  const pageEnd = Math.min(safePage * PAGE_SIZE, totalFiltered);
+  const yearOptions = Array.from({ length: 5 }, (_, index) => currentYear - index);
+  const statusOptions = useMemo(() => {
+    const allowedStatuses = phaseFilter
+      ? (PHASE_STATUSES[phaseFilter] ?? [])
+      : null;
+    const counts = metrics?.statusCounts ?? [];
+    const options = counts
+      .filter(
+        (item) =>
+          item.count > 0 &&
+          (!allowedStatuses || allowedStatuses.includes(item.status)),
+      )
+      .map((item) => ({
+        value: item.status,
+        label: `${STATUS_LABELS[item.status] ?? item.status} (${item.count})`,
+      }));
+    // Conserva visible el estado elegido aunque ya no tenga registros en el
+    // periodo, para que el filtro activo no parezca vacio.
+    if (status !== 'all' && !options.some((option) => option.value === status)) {
+      options.unshift({
+        value: status,
+        label: STATUS_LABELS[status] ?? status,
+      });
+    }
+    return options;
+  }, [metrics, phaseFilter, status]);
 
   function handlePhaseSelect(phaseId: number) {
-    setPhaseFilter((current) => (current === phaseId ? null : phaseId));
+    const next = phaseFilter === phaseId ? null : phaseId;
+    setPhaseFilter(next);
+    if (
+      next &&
+      status !== 'all' &&
+      !(PHASE_STATUSES[next] ?? []).includes(status)
+    ) {
+      setStatus('all');
+    }
     setPage(1);
   }
 
   function handleExport() {
     // RF-008: la exportacion ejecutiva PDF/XLSX queda pendiente; por ahora
-    // se entrega el mismo inventario filtrado en CSV (compatible con Excel).
+    // se entrega la pagina visible del inventario en CSV (compatible con
+    // Excel). La paginacion es del servidor, por lo que el archivo refleja
+    // exactamente las filas mostradas.
     const header = [
       'Clave',
       'Titulo',
       'Investigador',
-      'Departamento',
+      'Convocatoria',
       'Hito actual',
       'Vencimiento',
       'Semaforo',
       'Estado',
     ];
-    const rows = filtered.map((project) => [
+    const csvRows = rows.map((project) => [
       project.id,
       project.title,
       project.pi,
-      project.department,
+      project.call,
       project.milestone,
       formatDate(project.dueDate),
       SLA_LABELS[project.sla],
       STATUS_LABELS[project.projectStatus] ?? project.projectStatus,
     ]);
-    const csv = [header, ...rows]
+    const csv = [header, ...csvRows]
       .map((row) => row.map(escapeCsv).join(';'))
       .join('\r\n');
     const blob = new Blob([`\uFEFF${csv}`], {
@@ -171,9 +276,36 @@ export function AdminDashboard({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `athenea-proyectos-${year}.csv`;
+    link.download = `athenea-proyectos-${year}-pagina-${safePage}.csv`;
     link.click();
     URL.revokeObjectURL(url);
+  }
+
+  if (!metrics && loading) {
+    return (
+      <DashboardState
+        title="Cargando tablero institucional…"
+        description="Consultando proyectos, presupuesto y productividad del ciclo."
+        icon="refresh"
+        spinning
+      />
+    );
+  }
+
+  if (!metrics && error) {
+    return (
+      <DashboardState
+        title="No se pudo cargar el tablero"
+        description={error}
+        icon="alert"
+        action={{
+          label: 'Reintentar',
+          onClick: () => {
+            void refetch();
+          },
+        }}
+      />
+    );
   }
 
   return (
@@ -185,17 +317,44 @@ export function AdminDashboard({
         </p>
 
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-100 bg-brand-50 px-2.5 py-1 text-[10.5px] font-medium text-brand-800">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-            Datos de ejemplo (RF-008 en integración)
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10.5px] font-medium ${
+              data?.fromCache
+                ? 'border-brand-100 bg-brand-50 text-brand-800'
+                : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+            }`}
+            title={
+              data
+                ? `Generado: ${formatDateTime(data.generatedAt)} · Válido hasta: ${formatDateTime(data.cacheExpiresAt)}`
+                : undefined
+            }
+          >
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                data?.fromCache ? 'bg-brand-500' : 'bg-emerald-500'
+              }`}
+            />
+            {data?.fromCache
+              ? 'Caché activa (≤ 15 min)'
+              : 'Datos en vivo (RF-008)'}
           </span>
           <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-white px-2.5 py-1 text-[10.5px] font-medium text-muted">
             P95 &lt; 3s (RF-013)
+            {data && (
+              <strong className="font-semibold text-ink">
+                · {Math.max(0, Math.round(data.computationMs))} ms
+              </strong>
+            )}
           </span>
           <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-white px-2.5 py-1 text-[10.5px] font-medium text-muted">
             <Icon name="eye" className="h-3 w-3" />
             Vista: {roleScopeLabel(user.role)}
           </span>
+          {loading && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10.5px] font-medium text-amber-800">
+              Actualizando…
+            </span>
+          )}
         </div>
 
         <div className="mt-3 flex flex-col gap-4 xl:flex-row xl:flex-wrap xl:items-start xl:justify-between">
@@ -216,28 +375,52 @@ export function AdminDashboard({
             <select
               id="dashboard-year"
               value={year}
-              onChange={(event) => setYear(event.target.value)}
+              onChange={(event) => {
+                setYear(Number(event.target.value));
+                setPage(1);
+              }}
               className="h-9 rounded-md border border-line bg-white px-3 pr-8 text-xs font-medium text-ink focus:border-brand-300 focus:outline-none"
             >
-              <option value="2026">Año en Curso 2026 (Ciclo Activo)</option>
-              <option value="2025">Ciclo 2025 (Cerrado)</option>
-              <option value="2024">Ciclo 2024 (Cerrado)</option>
+              {yearOptions.map((option, index) => (
+                <option key={option} value={option}>
+                  {index === 0
+                    ? `Año en Curso ${option} (Ciclo Activo)`
+                    : `Ciclo ${option} (Cerrado)`}
+                </option>
+              ))}
             </select>
             <button
               type="button"
               onClick={handleExport}
-              className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-900 px-3.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-800"
-              title="Exporta el inventario filtrado en CSV (PDF/XLSX pendiente, RF-008)"
+              disabled={rows.length === 0}
+              className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-900 px-3.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-50"
+              title="Exporta la página visible del inventario en CSV (PDF/XLSX pendiente, RF-008)"
             >
               <Icon name="download" className="h-4 w-4" />
               Exportar Informe Ejecutivo
-              <span className="text-[10px] font-medium text-white/70">
-                PDF / XLSX
-              </span>
+              <span className="text-[10px] font-medium text-white/70">CSV</span>
             </button>
           </div>
         </div>
       </header>
+
+      {error && metrics && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-[11.5px] text-red-800"
+        >
+          <span>{error}</span>
+          <button
+            type="button"
+            onClick={() => {
+              void refetch();
+            }}
+            className="rounded-md border border-red-300 bg-white px-2.5 py-1 font-semibold text-red-700"
+          >
+            Reintentar
+          </button>
+        </div>
+      )}
 
       <section
         aria-label="Indicadores institucionales"
@@ -253,65 +436,74 @@ export function AdminDashboard({
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="text-[17px] font-semibold tracking-tight text-ink">
-                Distribución por Departamento Académico
+                Distribución por Estado del Proyecto
               </h2>
               <p className="mt-1 text-[11.5px] text-muted">
-                Volumen y asignación porcentual de iniciativas científicas
-                activas
+                Volumen y participación porcentual del inventario en el periodo
+                seleccionado
               </p>
             </div>
             <span className="rounded-md border border-brand-100 bg-brand-50 px-2.5 py-1 text-[10.5px] font-medium text-brand-800">
-              4 Unidades Clave
+              {metrics?.totalProjects ?? 0} proyectos
             </span>
           </div>
 
-          <ul className="mt-5 space-y-4">
-            {DEPARTMENT_SHARES.map((item) => (
-              <li key={item.name}>
-                <div className="flex items-baseline justify-between gap-3">
-                  <span className="flex min-w-0 items-center gap-2 text-[12.5px] font-medium text-ink">
-                    <span
-                      className={`h-2.5 w-2.5 shrink-0 rounded-sm ${item.barClassName}`}
+          {shares.length > 0 ? (
+            <ul className="mt-5 space-y-4">
+              {shares.map((item) => (
+                <li key={item.name}>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="flex min-w-0 items-center gap-2 text-[12.5px] font-medium text-ink">
+                      <span
+                        className={`h-2.5 w-2.5 shrink-0 rounded-sm ${item.barClassName}`}
+                      />
+                      <span className="truncate">{item.name}</span>
+                    </span>
+                    <span className="shrink-0 text-[11px] text-muted">
+                      <strong className="font-semibold text-ink">
+                        {item.projects}
+                      </strong>{' '}
+                      proyectos ({item.share}%)
+                    </span>
+                  </div>
+                  <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-[#eef1f7]">
+                    <div
+                      className={`h-full rounded-full ${item.barClassName}`}
+                      style={{ width: `${item.share}%` }}
                     />
-                    <span className="truncate">{item.name}</span>
-                  </span>
-                  <span className="shrink-0 text-[11px] text-muted">
-                    <strong className="font-semibold text-ink">
-                      {item.projects}
-                    </strong>{' '}
-                    proyectos ({item.share}%)
-                  </span>
-                </div>
-                <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-[#eef1f7]">
-                  <div
-                    className={`h-full rounded-full ${item.barClassName}`}
-                    style={{ width: `${item.share}%` }}
-                  />
-                </div>
-              </li>
-            ))}
-          </ul>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-6 rounded-lg border border-line bg-[#f8f9fd] px-4 py-6 text-center text-[11.5px] text-muted">
+              No hay proyectos registrados para el periodo seleccionado.
+            </p>
+          )}
 
-          {canSeeBudget && (
+          {canSeeBudget && metrics && metrics.budget.spent !== null ? (
             <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-[#f8f9fd] px-3 py-2.5">
               <span className="flex min-w-0 items-center gap-2 text-[11.5px] text-ink">
                 <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-white text-brand-700">
-                  <Icon name="folder" className="h-4 w-4" />
+                  <Icon name="wallet" className="h-4 w-4" />
                 </span>
                 <span className="truncate">
-                  Mayor concentración de financiamiento:{' '}
+                  Presupuesto ejercido:{' '}
                   <strong className="font-semibold">
-                    Software &amp; Algoritmos IA (44.2%)
-                  </strong>
+                    {formatCurrency(metrics?.budget.spent ?? 0)}
+                  </strong>{' '}
+                  · {metrics?.budget.expenseCount ?? 0} gastos registrados
                 </span>
               </span>
-              <span
-                className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand-700"
-                title="Detalle presupuestal: módulo pendiente de implementación"
-              >
-                Ver detalle presupuestal
-                <Icon name="arrowRight" className="h-3.5 w-3.5" />
+              <span className="text-[10.5px] font-medium text-muted">
+                {metrics?.budget.budgetEnabledProjects ?? 0} proyectos con
+                presupuesto habilitado
               </span>
+            </div>
+          ) : (
+            <div className="mt-5 rounded-lg border border-line bg-[#f8f9fd] px-3 py-2.5 text-[10.5px] text-muted">
+              Vista de Comité: las cifras presupuestales están restringidas por
+              rol (RF-001).
             </div>
           )}
         </section>
@@ -359,16 +551,21 @@ export function AdminDashboard({
           </div>
           <div className="flex items-center gap-2">
             <span className="rounded-full border border-line bg-[#f8f9fd] px-2.5 py-1 text-[10.5px] font-medium text-muted">
-              {filtered.length} registros cargados
+              {totalFiltered} registros
             </span>
             <button
               type="button"
-              onClick={() => setPage(1)}
+              onClick={() => {
+                void refetch();
+              }}
               className="grid h-7 w-7 place-items-center rounded-full border border-line text-muted transition hover:text-brand-700"
               aria-label="Actualizar vista de proyectos"
-              title="Actualizar vista"
+              title="Volver a consultar el tablero"
             >
-              <Icon name="refresh" className="h-3.5 w-3.5" />
+              <Icon
+                name="refresh"
+                className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`}
+              />
             </button>
           </div>
         </div>
@@ -382,22 +579,12 @@ export function AdminDashboard({
             />
             <input
               aria-label="Buscar proyecto"
-              placeholder="Búsqueda FTS: título, protocolo, PI o palabras clave…"
+              placeholder="Buscar por título o investigador principal…"
               className="h-9 w-full rounded-md border border-line bg-[#f8f9fd] pl-8 pr-3 text-[11.5px] text-ink placeholder:text-muted focus:border-brand-300 focus:bg-white focus:outline-none"
               value={query}
               onChange={(event) => onSearchChange(event.target.value)}
             />
           </label>
-          <FilterSelect
-            label="Área"
-            value={department}
-            onChange={(value) => {
-              setDepartment(value);
-              setPage(1);
-            }}
-            options={departments.map((item) => ({ value: item, label: item }))}
-            allLabel="Todas las Áreas"
-          />
           <FilterSelect
             label="Estado"
             value={status}
@@ -405,10 +592,7 @@ export function AdminDashboard({
               setStatus(value);
               setPage(1);
             }}
-            options={statuses.map((item) => ({
-              value: item,
-              label: STATUS_LABELS[item] ?? item,
-            }))}
+            options={statusOptions}
             allLabel="Todos los Estados"
           />
           <FilterSelect
@@ -418,16 +602,19 @@ export function AdminDashboard({
               setCall(value);
               setPage(1);
             }}
-            options={calls.map((item) => ({ value: item, label: item }))}
+            options={callOptions.map((option) => ({
+              value: option.callId,
+              label: option.title,
+            }))}
             allLabel="Convocatoria: Todas"
           />
         </div>
 
         <div className="mt-4 overflow-x-auto">
-          <table className="w-full min-w-[900px] border-collapse text-left">
+          <table className="w-full min-w-[980px] border-collapse text-left">
             <caption className="sr-only">
               Proyectos prioritarios con su investigador principal,
-              departamento, hito actual y semáforo SLA
+              convocatoria, hito actual, estado y semáforo SLA
             </caption>
             <thead>
               <tr className="border-y border-line bg-[#f8f9fd] text-[9.5px] font-semibold uppercase tracking-[0.08em] text-muted">
@@ -441,10 +628,13 @@ export function AdminDashboard({
                   Investigador (PI)
                 </th>
                 <th scope="col" className="px-3 py-2.5">
-                  Departamento
+                  Convocatoria
                 </th>
                 <th scope="col" className="px-3 py-2.5">
                   Hito actual
+                </th>
+                <th scope="col" className="px-3 py-2.5">
+                  Estado
                 </th>
                 <th scope="col" className="px-5 py-2.5">
                   Semáforo
@@ -452,13 +642,16 @@ export function AdminDashboard({
               </tr>
             </thead>
             <tbody>
-              {pageRows.map((project) => (
+              {loading && rows.length === 0 && (
+                <SkeletonRows rows={4} columns={7} />
+              )}
+              {rows.map((project) => (
                 <ProjectRow key={project.id} project={project} />
               ))}
-              {pageRows.length === 0 && (
+              {!loading && rows.length === 0 && (
                 <tr>
                   <td
-                    colSpan={6}
+                    colSpan={7}
                     className="px-5 py-10 text-center text-[12px] text-muted"
                   >
                     No hay proyectos que coincidan con los filtros
@@ -474,30 +667,42 @@ export function AdminDashboard({
           <p className="text-[11px] text-muted">
             Mostrando{' '}
             <strong className="font-semibold text-ink">
-              {filtered.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1}–
-              {Math.min(safePage * PAGE_SIZE, filtered.length)}
+              {pageStart}–{pageEnd}
             </strong>{' '}
-            de {filtered.length} proyectos
+            de {totalFiltered} proyectos
+            {data && (
+              <span className="ml-2 text-[10px]">
+                · generado {formatDateTime(data.generatedAt)}
+              </span>
+            )}
           </p>
           <div className="flex items-center gap-2">
             <span className="rounded-md border border-line bg-[#f8f9fd] px-2 py-1 text-[10px] font-medium text-muted">
-              Paginación cliente ({PAGE_SIZE}/página)
+              Paginación servidor ({PAGE_SIZE}/página)
             </span>
             <div className="flex items-center gap-1">
               <PagerButton
                 label="Página anterior"
-                disabled={safePage === 1}
-                onClick={() => setPage(safePage - 1)}
+                disabled={safePage <= 1 || loading}
+                onClick={() => setPage(Math.max(1, safePage - 1))}
                 glyph="‹"
               />
-              {Array.from({ length: totalPages }, (_, index) => index + 1).map(
-                (pageNumber) => (
+              {pageWindow(safePage, totalPages).map((pageNumber, index) =>
+                pageNumber === 'gap' ? (
+                  <span
+                    key={`gap-${index}`}
+                    className="px-1 text-[11px] text-muted"
+                  >
+                    …
+                  </span>
+                ) : (
                   <button
                     key={pageNumber}
                     type="button"
                     onClick={() => setPage(pageNumber)}
+                    disabled={loading}
                     aria-current={pageNumber === safePage ? 'page' : undefined}
-                    className={`h-7 min-w-7 rounded-md px-2 text-[11px] font-semibold transition ${
+                    className={`h-7 min-w-7 rounded-md px-2 text-[11px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
                       pageNumber === safePage
                         ? 'bg-brand-800 text-white'
                         : 'border border-line bg-white text-ink hover:bg-brand-50'
@@ -509,8 +714,8 @@ export function AdminDashboard({
               )}
               <PagerButton
                 label="Página siguiente"
-                disabled={safePage === totalPages}
-                onClick={() => setPage(safePage + 1)}
+                disabled={safePage >= totalPages || loading}
+                onClick={() => setPage(Math.min(totalPages, safePage + 1))}
                 glyph="›"
               />
             </div>
@@ -561,9 +766,6 @@ function ProjectRow({ project }: { project: PriorityProject }) {
         <p className="text-[12px] font-semibold leading-snug text-ink">
           {project.title}
         </p>
-        <p className="mt-1 text-[10.5px] leading-snug text-muted">
-          {project.call}
-        </p>
       </td>
       <td className="px-3 py-3.5">
         <span className="flex items-center gap-2">
@@ -575,8 +777,8 @@ function ProjectRow({ project }: { project: PriorityProject }) {
           </span>
         </span>
       </td>
-      <td className="px-3 py-3.5 text-[11px] text-muted">
-        {project.department}
+      <td className="max-w-[190px] px-3 py-3.5 text-[11px] text-muted">
+        <span className="line-clamp-2">{project.call}</span>
       </td>
       <td className="px-3 py-3.5">
         <p
@@ -589,8 +791,15 @@ function ProjectRow({ project }: { project: PriorityProject }) {
         <p className="mt-1 text-[10px] text-muted">
           {isLate
             ? `Expiró hace ${project.daysLate ?? 0} días (RF-006)`
-            : `Vence: ${formatDate(project.dueDate)}`}
+            : project.sla === 'no_milestones'
+              ? `Fin del proyecto: ${formatDate(project.dueDate)}`
+              : `Vence: ${formatDate(project.dueDate)}`}
         </p>
+      </td>
+      <td className="px-3 py-3.5">
+        <span className="inline-flex whitespace-nowrap rounded-full border border-line bg-[#f8f9fd] px-2.5 py-1 text-[10px] font-medium text-ink">
+          {STATUS_LABELS[project.projectStatus] ?? project.projectStatus}
+        </span>
       </td>
       <td className="px-5 py-3.5">
         <span
@@ -603,6 +812,64 @@ function ProjectRow({ project }: { project: PriorityProject }) {
         </span>
       </td>
     </tr>
+  );
+}
+
+function SkeletonRows({ rows, columns }: { rows: number; columns: number }) {
+  return (
+    <>
+      {Array.from({ length: rows }, (_, rowIndex) => (
+        <tr key={`skeleton-${rowIndex}`} className="border-b border-line/70">
+          {Array.from({ length: columns }, (_, columnIndex) => (
+            <td key={`cell-${columnIndex}`} className="px-3 py-4">
+              <span className="block h-2.5 w-full animate-pulse rounded bg-[#e8edf7]" />
+            </td>
+          ))}
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function DashboardState({
+  title,
+  description,
+  icon,
+  spinning,
+  action,
+}: {
+  title: string;
+  description: string;
+  icon: 'refresh' | 'alert';
+  spinning?: boolean;
+  action?: { label: string; onClick: () => void };
+}) {
+  return (
+    <div className="grid min-h-[420px] place-items-center rounded-xl border border-line bg-white p-8">
+      <div className="flex max-w-md flex-col items-center text-center">
+        <span className="grid h-12 w-12 place-items-center rounded-xl bg-brand-50 text-brand-700">
+          <Icon
+            name={icon}
+            className={`h-6 w-6 ${spinning ? 'animate-spin' : ''}`}
+          />
+        </span>
+        <h2 className="mt-4 text-[18px] font-semibold tracking-tight text-ink">
+          {title}
+        </h2>
+        <p className="mt-1.5 text-[12px] leading-relaxed text-muted">
+          {description}
+        </p>
+        {action && (
+          <button
+            type="button"
+            onClick={action.onClick}
+            className="mt-5 inline-flex h-9 items-center rounded-md bg-brand-900 px-4 text-xs font-semibold text-white transition hover:bg-brand-800"
+          >
+            {action.label}
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -665,16 +932,12 @@ function PagerButton({
 
 function roleScopeLabel(role: DashboardUser['role']): string {
   if (role === 'COMMITTEE') {
-    return 'Comité (solo dictámenes)';
+    return 'Comité (sin presupuesto)';
   }
   if (role === 'COORDINATOR') {
     return 'Coordinación';
   }
   return 'Administración';
-}
-
-function unique<T>(values: T[]): T[] {
-  return Array.from(new Set(values));
 }
 
 function escapeCsv(value: string): string {
@@ -683,4 +946,4 @@ function escapeCsv(value: string): string {
 
 /** Referencia usada por el buscador superior cuando el rol es institucional. */
 export const ADMIN_SEARCH_PLACEHOLDER =
-  'Búsqueda global FTS: proyectos, protocolos, comités...';
+  'Buscar por proyecto, investigador o convocatoria...';

@@ -9,6 +9,7 @@ import { DocumentsModule } from './documents/documents.module.js';
 import { ProposalEvaluationModule } from './proposal_evaluation/proposal-evaluation.module.js';
 import { ProjectsModule } from './projects/projects.module.js';
 import { MilestonesModule } from './milestones/milestones.module.js';
+import { ReportingModule } from './reporting/reporting.module.js';
 @Module({
   imports: [
     GraphQLModule.forRoot<ApolloDriverConfig>({
@@ -33,6 +34,7 @@ import { MilestonesModule } from './milestones/milestones.module.js';
     DocumentUploadModule,
     DocumentsModule,
     MilestonesModule,
+    ReportingModule,
   ],
   controllers: [AppController],
   providers: [AppService],
