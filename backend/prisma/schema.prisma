@@ -215,6 +215,11 @@ model Project {
   // Opcional para no bloquear registros fuera de convocatoria.
   call_id         Int?
 
+  // RF-020: archivo institucional inmutable. El proyecto conserva su
+  // informacion, pero ninguna operacion de escritura puede modificarla.
+  is_read_only    Boolean       @default(false)
+  archived_at     DateTime?     @db.Timestamp()
+
   // Relaciones inversas
   call            Announcement?   @relation(fields: [call_id], references: [call_id])
   projectUsers    Project_User[]
@@ -225,9 +230,13 @@ model Project {
   // RF-019: historial formal de decisiones y alertas de conflicto (BR-011).
   evaluations     Proposal_Evaluation[]
   conflicts       Review_Conflict[]
+  // RF-020: snapshot inmutable y alertas de archivado fallido.
+  archive         Project_Archive?
+  archiveAlerts   Archive_Alert[]
 
   // RF-008 / RF-013: indices para el dashboard institucional.
   @@index([status])
+  @@index([status, is_read_only])
   @@index([start_date, end_date])
   @@index([call_id])
 }
@@ -383,4 +392,39 @@ model Review_Conflict {
 
   @@unique([project_id, reviewer_id])
   @@index([status])
+}
+
+// ==========================================
+// ARCHIVO INSTITUCIONAL (RF-020)
+// Al pasar a Closed, el proyecto se congela
+// en solo lectura y se conserva un snapshot
+// inmutable de todo su expediente.
+// ==========================================
+
+model Project_Archive {
+  archive_id    Int      @id @default(autoincrement())
+  project_id    Int      @unique
+  // Copia congelada del proyecto y sus relaciones (JSONB).
+  snapshot      Json
+  // SHA-256 del snapshot para detectar alteraciones posteriores.
+  snapshot_hash String   @db.VarChar(64)
+  archived_at   DateTime @default(now()) @db.Timestamp()
+
+  project       Project  @relation(fields: [project_id], references: [project_id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([archived_at])
+}
+
+model Archive_Alert {
+  alert_id      Int       @id @default(autoincrement())
+  // null cuando falla el job completo (p. ej. BD no disponible).
+  project_id    Int?
+  attempted_at  DateTime  @default(now()) @db.Timestamp()
+  error_message String    @db.Text
+  resolved_at   DateTime? @db.Timestamp()
+
+  project       Project?  @relation(fields: [project_id], references: [project_id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([project_id, attempted_at])
+  @@index([resolved_at])
 }
