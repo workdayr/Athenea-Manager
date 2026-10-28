@@ -249,6 +249,7 @@ export function ProjectDashboard({
 
   const view = mapRealProject(selectedProject, user);
   const activeId = String(selectedProject.projectId);
+  const isReadOnly = selectedProject.isReadOnly;
   const counts = countByStatus(tasks);
   const hasBudget =
     view.budget.enabled && user.role === 'PRINCIPAL_INVESTIGATOR';
@@ -257,6 +258,12 @@ export function ProjectDashboard({
   ).length;
 
   const handleUploadEvidence = async (milestoneId: number, file: File) => {
+    if (isReadOnly) {
+      alert(
+        'El proyecto está archivado en modo solo lectura (RF-020); no admite nuevas evidencias.',
+      );
+      return;
+    }
     setUploadingTask(`MS-${milestoneId}`);
     try {
       await uploadMilestoneEvidence(milestoneId, file);
@@ -449,6 +456,19 @@ export function ProjectDashboard({
               <span className="rounded-full border border-brand-100 bg-brand-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-brand-800">
                 Proyecto {STATUS_LABELS[view.status] ?? view.status}
               </span>
+              {isReadOnly && (
+                <span
+                  className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10px] font-semibold text-amber-800"
+                  title={
+                    selectedProject.archivedAt
+                      ? `Archivado el ${formatDate(selectedProject.archivedAt)}`
+                      : 'Proyecto archivado en modo solo lectura'
+                  }
+                >
+                  <Icon name="stamp" className="h-3 w-3" />
+                  Archivo institucional · Solo lectura
+                </span>
+              )}
               <span className="rounded-md border border-line bg-[#f8f9fd] px-2 py-0.5 text-[10px] font-semibold tracking-wide text-brand-700">
                 {view.id}
               </span>
@@ -605,6 +625,7 @@ export function ProjectDashboard({
                 userName={user.name} 
                 onUpload={handleUploadEvidence}
                 uploading={uploadingTask === task.id}
+                readOnly={isReadOnly}
               />
             ))}
             {filteredTasks.length === 0 && (
@@ -959,12 +980,14 @@ function TaskRow({
   task, 
   userName, 
   onUpload, 
-  uploading 
+  uploading,
+  readOnly,
 }: { 
   task: DashboardTask; 
   userName: string; 
   onUpload: (id: number, file: File) => void; 
   uploading: boolean; 
+  readOnly: boolean;
 }) {
   const due = formatDate(task.dueDate);
   const assignee =
@@ -1009,8 +1032,14 @@ function TaskRow({
           {TASK_STATUS_LABELS[task.status]}
         </span>
 
-        {/* Botón de subir evidencia (solo si es una tarea real y no está completada) */}
-        {task.status !== 'Completed' && task.id.startsWith('MS-') && (
+        {/* Botón de subir evidencia (solo si es una tarea real, no está completada y el proyecto no está archivado) */}
+        {readOnly && task.status !== 'Completed' && task.id.startsWith('MS-') && (
+          <span className="mt-1 inline-flex items-center gap-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-medium text-amber-800">
+            <Icon name="stamp" className="h-3 w-3" />
+            Solo lectura
+          </span>
+        )}
+        {!readOnly && task.status !== 'Completed' && task.id.startsWith('MS-') && (
           <div className="mt-1">
             <input
               type="file"

@@ -126,6 +126,9 @@ export interface MyProjectSummary {
   milestonesCompleted: number;
   budgetEnabled: boolean;
   budgetSpent: number | null;
+  /** RF-020: el proyecto esta archivado en modo solo lectura. */
+  isReadOnly: boolean;
+  archivedAt: string | null;
 }
 
 export const MY_PROJECTS_QUERY = gql`
@@ -148,6 +151,8 @@ export const MY_PROJECTS_QUERY = gql`
       milestonesCompleted
       budgetEnabled
       budgetSpent
+      isReadOnly
+      archivedAt
     }
   }
 `;
