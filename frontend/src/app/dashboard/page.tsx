@@ -39,6 +39,7 @@ export default function DashboardPage() {
           return;
         }
         setUser({
+          id: data.user.id,
           name: data.user.name,
           email: data.user.email,
           role: toPlatformRole((data.user as { role?: unknown }).role),
@@ -91,7 +92,7 @@ export default function DashboardPage() {
       searchQuery={query}
       searchPlaceholder={
         institutional
-          ? 'Búsqueda global FTS: proyectos, protocolos, comités...'
+          ? 'Buscar por proyecto, investigador o convocatoria...'
           : 'Buscar en tareas, documentos y evidencias...'
       }
       onSearchChange={setQuery}

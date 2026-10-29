@@ -4,11 +4,10 @@ import type { IconName } from '@/components/dashboard/icons';
 /**
  * Modelo de datos y reglas de presentacion del dashboard (UC-009 / RF-008).
  *
- * Estado de la integracion: `myProjects` ya existe en GraphQL y alimenta la
- * identidad del proyecto; las secciones de tareas, documentos y metricas
- * agregadas aun no tienen endpoint, por lo que se alimentan con datos de
- * ejemplo marcados con `isDemo`. Al existir esos endpoints basta con
- * reemplazar los arreglos exportados al final del archivo.
+ * El tablero institucional (RF-008) consume `coordinatorDashboard` mediante
+ * `@/lib/reporting`; este archivo conserva los tipos, etiquetas y utilidades
+ * compartidas. La vista de proyecto consume `myProjects` y muestra estados
+ * vacios cuando el usuario no tiene proyectos, sin datos de ejemplo.
  */
 
 export type PlatformRole =
@@ -19,6 +18,7 @@ export type PlatformRole =
   | 'STUDENT';
 
 export interface DashboardUser {
+  id: string;
   name: string;
   email: string;
   role: PlatformRole;
@@ -202,13 +202,14 @@ const LIFECYCLE_TEMPLATE = [
   },
 ] as const;
 
-/** Embudo institucional: los conteos alimentan el tablero agregado. */
-export function institutionalLifecycle(): LifecycleModel {
-  const counts = [14, 8, 6, 22, 4];
+/** Embudo institucional: los conteos provienen de `coordinatorDashboard`. */
+export function institutionalLifecycle(
+  counts: number[] = [0, 0, 0, 0, 0],
+): LifecycleModel {
   return {
     steps: LIFECYCLE_TEMPLATE.map((step, index) => ({
       ...step,
-      count: counts[index],
+      count: counts[index] ?? 0,
     })),
     currentId: 4,
   };
@@ -217,6 +218,7 @@ export function institutionalLifecycle(): LifecycleModel {
 /** Etapa del ciclo de vida segun el estado del proyecto (Prisma). */
 export function phaseForStatus(status: string): number {
   switch (status) {
+    case 'Draft':
     case 'Proposed':
       return 1;
     case 'Under_Review':
@@ -254,6 +256,7 @@ export function projectLifecycle(status: string): LifecycleModel {
 }
 
 export const STATUS_LABELS: Record<string, string> = {
+  Draft: 'Borrador',
   Proposed: 'Propuesto',
   Under_Review: 'En revisión',
   Approved: 'Aprobado',
@@ -265,7 +268,7 @@ export const STATUS_LABELS: Record<string, string> = {
 };
 
 /* -------------------------------------------------------------------------- */
-/* KPIs institucionales                                                       */
+/* KPIs                                                                       */
 /* -------------------------------------------------------------------------- */
 
 export interface InstitutionalKpi {
@@ -287,131 +290,19 @@ export interface InstitutionalKpi {
   roles: PlatformRole[];
 }
 
-export const INSTITUTIONAL_KPIS: InstitutionalKpi[] = [
-  {
-    id: 'projects',
-    label: 'Proyectos totales registrados',
-    value: '48',
-    caption: 'Del ciclo activo',
-    icon: 'grid',
-    delta: '+12% vs ciclo ant.',
-    chips: [
-      { label: '14', value: 'Propuestos' },
-      { label: '8', value: 'En Revisión' },
-      { label: '22', value: 'Activos' },
-      { label: '4', value: 'Concluidos' },
-    ],
-    roles: ['ADMINISTRATOR', 'COORDINATOR', 'COMMITTEE'],
-  },
-  {
-    id: 'approval',
-    label: 'Tasa de aprobación de comité',
-    value: '76.4%',
-    caption: 'Dictamen emitido',
-    icon: 'gauge',
-    progress: {
-      prefix: 'Promedio: 18',
-      highlight: 'SLA',
-      suffix: 'Objetivo: < 30 días',
-      percent: 60,
-    },
-    roles: ['ADMINISTRATOR', 'COORDINATOR', 'COMMITTEE'],
-  },
-  {
-    id: 'risk',
-    label: 'Hitos y entregas en riesgo',
-    value: '3',
-    caption: 'Retraso Crítico',
-    icon: 'alert',
-    alert:
-      'Alerta automatizada (Cron >7 días RF-006). Notificación enviada al PI.',
-    roles: ['ADMINISTRATOR', 'COORDINATOR', 'COMMITTEE'],
-  },
-  {
-    id: 'budget',
-    label: 'Presupuesto global I+D',
-    value: '$4,850,000',
-    caption: 'MXN Asignados (2026)',
-    icon: 'wallet',
-    progress: {
-      prefix: 'Ejercicio: $2,910,250',
-      highlight: 'MXN',
-      suffix: '59.9%',
-      percent: 59.9,
-    },
-    roles: ['ADMINISTRATOR', 'COORDINATOR'],
-  },
-  {
-    id: 'reviews',
-    label: 'Dictámenes emitidos',
-    value: '128',
-    caption: 'En el ciclo activo',
-    icon: 'stamp',
-    chips: [
-      { label: '86', value: 'Aprobados' },
-      { label: '27', value: 'Con observaciones' },
-      { label: '15', value: 'Rechazados' },
-    ],
-    roles: ['COMMITTEE'],
-  },
-];
-
-export function visibleKpis(role: PlatformRole): InstitutionalKpi[] {
-  return INSTITUTIONAL_KPIS.filter((kpi) => kpi.roles.includes(role));
-}
-
-/* -------------------------------------------------------------------------- */
-/* Distribucion por departamento                                              */
-/* -------------------------------------------------------------------------- */
-
-export interface DepartmentShare {
-  name: string;
-  projects: number;
-  share: number;
-  barClassName: string;
-}
-
-export const DEPARTMENT_SHARES: DepartmentShare[] = [
-  {
-    name: 'Ingeniería de Software e Inteligencia Computacional',
-    projects: 18,
-    share: 37.5,
-    barClassName: 'bg-[#1e3a6e]',
-  },
-  {
-    name: 'Biotecnología y Ciencias Genómicas',
-    projects: 14,
-    share: 29.2,
-    barClassName: 'bg-[#2f7d8a]',
-  },
-  {
-    name: 'Tecnologías Ambientales y Recursos Hídricos',
-    projects: 9,
-    share: 18.8,
-    barClassName: 'bg-[#7c8aa5]',
-  },
-  {
-    name: 'Mecatrónica y Sistemas Autónomos',
-    projects: 7,
-    share: 14.5,
-    barClassName: 'bg-[#aab3c5]',
-  },
-];
-
 /* -------------------------------------------------------------------------- */
 /* Tabla de seguimiento de proyectos                                          */
 /* -------------------------------------------------------------------------- */
 
-export type SlaStatus = 'on_track' | 'at_risk' | 'upcoming';
+export type SlaStatus = 'on_track' | 'at_risk' | 'upcoming' | 'no_milestones';
 
 export interface PriorityProject {
   id: string;
   title: string;
   call: string;
   pi: string;
-  department: string;
   milestone: string;
-  /** Fecha ISO del hito actual. */
+  /** Fecha ISO del hito actual (o fin del proyecto si no hay hitos). */
   dueDate: string;
   sla: SlaStatus;
   projectStatus: string;
@@ -423,140 +314,9 @@ export const SLA_LABELS: Record<SlaStatus, string> = {
   on_track: 'Al día',
   at_risk: 'Retraso Crítico',
   upcoming: 'Próximo',
+  no_milestones: 'Sin hitos',
 };
 
-export const PRIORITY_PROJECTS: PriorityProject[] = [
-  {
-    id: 'UPD-2024-001',
-    title:
-      'Optimización Algorítmica con IA para Redes de Distribución Energética',
-    call: 'CONV-2024-A · Trámite 2/4',
-    pi: 'Dr. Martín Castillo',
-    department: 'Ing. de Software',
-    milestone: 'Validación de Modelo Simulado',
-    dueDate: '2026-11-15',
-    sla: 'on_track',
-    projectStatus: 'Active',
-  },
-  {
-    id: 'UPD-2024-009',
-    title: 'Bio-remediación en Aguas Residuales con Microalgas Nativas',
-    call: 'CONAHYT Frontera · Dictamen Ético: Aprobado',
-    pi: 'Dra. Silvia Lomelí',
-    department: 'Tec. Ambientales',
-    milestone: 'Informe Técnico Trimestral II',
-    dueDate: '2026-10-11',
-    sla: 'at_risk',
-    projectStatus: 'Active',
-    daysLate: 9,
-  },
-  {
-    id: 'UPD-2024-015',
-    title:
-      'Sistema Distribuido para Trazabilidad Agrícola mediante Sensores IoT',
-    call: 'Vinculación Industrial Agro · Tranche 1/3',
-    pi: 'Mtro. Rodrigo Arias',
-    department: 'Mecatrónica',
-    milestone: 'Despliegue de Gateway en Invernadero',
-    dueDate: '2026-10-28',
-    sla: 'upcoming',
-    projectStatus: 'Active',
-  },
-  {
-    id: 'UPD-2024-022',
-    title: 'Secuenciación y Mapeo Genético de Cepas Fúngicas Endémicas',
-    call: 'CONV-2024-A · Protocolo de Bioseguridad BSL-2',
-    pi: 'Dra. Claudia Paredes',
-    department: 'Biotecnología',
-    milestone: 'Aislamiento de Células y PCR',
-    dueDate: '2026-12-05',
-    sla: 'on_track',
-    projectStatus: 'Active',
-  },
-  {
-    id: 'UPD-2024-031',
-    title: 'Exoesqueleto Robótico Asistivo para Rehabilitación Neuromotora',
-    call: 'Salud y Dispositivos Médicos · Fase Clínica 1',
-    pi: 'Dr. Héctor Navarrete',
-    department: 'Mecatrónica',
-    milestone: 'Protocolo de Consentimiento Informado',
-    dueDate: '2026-11-22',
-    sla: 'on_track',
-    projectStatus: 'Active',
-  },
-  {
-    id: 'UPD-2024-018',
-    title: 'Modelo Predictivo de Demanda Eléctrica para Microrredes',
-    call: 'CONV-2025-B · Radicación',
-    pi: 'Dra. Ana Fuentes',
-    department: 'Ing. de Software',
-    milestone: 'Validación de requisitos de elegibilidad',
-    dueDate: '2026-11-30',
-    sla: 'upcoming',
-    projectStatus: 'Proposed',
-  },
-  {
-    id: 'UPD-2024-027',
-    title: 'Plataforma de Analítica para Trayectorias Escolares',
-    call: 'CONV-2025-B · Doble ciego',
-    pi: 'Mtro. Luis Trejo',
-    department: 'Ing. de Software',
-    milestone: 'Revisión por pares en curso',
-    dueDate: '2026-12-10',
-    sla: 'on_track',
-    projectStatus: 'Under_Review',
-  },
-  {
-    id: 'UPD-2024-004',
-    title: 'Caracterización de Suelos Agrícolas con Sensores Espectrales',
-    call: 'CONAHYT · Cierre de ciclo',
-    pi: 'Dra. Paula Serrano',
-    department: 'Tec. Ambientales',
-    milestone: 'Cierre de informe técnico',
-    dueDate: '2026-09-30',
-    sla: 'on_track',
-    projectStatus: 'Completed',
-  },
-  {
-    id: 'UPD-2024-036',
-    title: 'Gemelo Digital para Mantenimiento Predictivo de Turbinas',
-    call: 'Vinculación Industrial Agro · Tranche 2/3',
-    pi: 'Dr. Óscar Beltrán',
-    department: 'Mecatrónica',
-    milestone: 'Calibración del gemelo digital',
-    dueDate: '2026-10-31',
-    sla: 'upcoming',
-    projectStatus: 'Approved',
-  },
-  {
-    id: 'UPD-2024-041',
-    title: 'Nanomateriales para Captura de CO₂ en Procesos Industriales',
-    call: 'CONV-2025-B · Radicación',
-    pi: 'Dra. Renata Ibarra',
-    department: 'Biotecnología',
-    milestone: 'Síntesis de prototipo inicial',
-    dueDate: '2026-12-18',
-    sla: 'on_track',
-    projectStatus: 'Proposed',
-  },
-];
-
-/**
- * RF-001: el Comité solo consulta propuestas en dictamen; coordinacion y
- * administracion ven el inventario completo.
- */
-export function visiblePriorityProjects(
-  role: PlatformRole,
-): PriorityProject[] {
-  if (role === 'COMMITTEE') {
-    return PRIORITY_PROJECTS.filter(
-      (project) =>
-        project.projectStatus === 'Proposed' ||
-        project.projectStatus === 'Under_Review',
-    );
-  }
-  return PRIORITY_PROJECTS;
-}
 
 /* -------------------------------------------------------------------------- */
 /* Vista de proyecto (PI y miembros del equipo)                               */
@@ -573,9 +333,7 @@ export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
 export interface DashboardTask {
   id: string;
   title: string;
-  phase: string;
   dueDate: string;
-  priority: 'Alta' | 'Media' | 'Baja';
   status: TaskStatus;
   /** `me` = usuario activo; `team` = otro miembro del equipo. */
   assignee: 'me' | 'team';
@@ -589,7 +347,6 @@ export interface DashboardDocument {
   size: string;
   uploadedAt: string;
   visibility: 'Team_only' | 'Shared_with_administration';
-  status: 'Aprobado' | 'En revisión' | 'Vigente';
   /** Documentos reservados al PI y a la administración (RF-005). */
   piOnly?: boolean;
   /** US 4.1: protocolo o aprobación de ética (no puede ser privado). */
@@ -604,193 +361,13 @@ export interface ProjectView {
   description: string;
   objectives: string[];
   pi: string;
-  department: string;
   period: string;
   call: string;
   status: string;
-  /** Avance calculado 0-100. */
+  /** Avance calculado 0-100 a partir de hitos o del periodo. */
   progress: number;
-  budget: { assigned: number; spent: number };
+  budget: { enabled: boolean; spent: number };
   team: { name: string; role: string }[];
-  isDemoIdentity: boolean;
-}
-
-export const DEMO_PROJECT: ProjectView = {
-  id: 'UPD-2024-001',
-  title:
-    'Optimización Algorítmica con IA para Redes de Distribución Energética',
-  description:
-    'Diseño y validación de un motor de optimización basado en aprendizaje profundo para la planeación operativa de redes de distribución eléctrica, con énfasis en reducción de pérdidas técnicas y resiliencia ante demanda pico.',
-  objectives: [
-    'Reducir en al menos 12% las pérdidas técnicas de la red piloto mediante despacho optimizado.',
-    'Desarrollar un modelo predictivo de demanda con error absoluto medio inferior al 4%.',
-    'Documentar la arquitectura reproducible del sistema y transferirla al área de Operaciones.',
-    'Publicar un artículo arbitrado y registrar el software ante la Vicerrectoría de I+D+I.',
-  ],
-  pi: 'Dr. Martín Castillo',
-  department: 'Ingeniería de Software',
-  period: 'Ene 2026 – Dic 2027',
-  call: 'CONV-2024-A · Trámite 2/4',
-  status: 'Active',
-  progress: 62,
-  budget: { assigned: 1_250_000, spent: 742_500 },
-  team: [
-    { name: 'Dr. Martín Castillo', role: 'Investigador Principal' },
-    { name: 'Dra. Lucía Ramírez', role: 'Co-Investigadora' },
-    { name: 'Ing. Diego Salas', role: 'Asistente de investigación' },
-  ],
-  isDemoIdentity: true,
-};
-
-export const PROJECT_TASKS: DashboardTask[] = [
-  {
-    id: 'T-101',
-    title: 'Protocolo metodológico v3 y dictamen ético',
-    phase: 'Radicación',
-    dueDate: '2026-10-12',
-    priority: 'Alta',
-    status: 'Completed',
-    assignee: 'me',
-  },
-  {
-    id: 'T-102',
-    title: 'Recolección de datos históricos de demanda (2020-2025)',
-    phase: 'Ejecución',
-    dueDate: '2026-10-18',
-    priority: 'Media',
-    status: 'Completed',
-    assignee: 'team',
-    assigneeName: 'Ing. Diego Salas',
-  },
-  {
-    id: 'T-103',
-    title: 'Informe técnico trimestral I',
-    phase: 'Ejecución',
-    dueDate: '2026-10-20',
-    priority: 'Alta',
-    status: 'In_Progress',
-    assignee: 'team',
-    assigneeName: 'Dra. Lucía Ramírez',
-  },
-  {
-    id: 'T-104',
-    title: 'Validar modelo de simulación en red piloto',
-    phase: 'Ejecución',
-    dueDate: '2026-10-28',
-    priority: 'Alta',
-    status: 'In_Progress',
-    assignee: 'me',
-  },
-  {
-    id: 'T-105',
-    title: 'Integrar capa de optimización con el SCADA',
-    phase: 'Ejecución',
-    dueDate: '2026-11-04',
-    priority: 'Media',
-    status: 'Pending',
-    assignee: 'me',
-  },
-  {
-    id: 'T-106',
-    title: 'Entrenamiento del modelo con datos 2024-2025',
-    phase: 'Ejecución',
-    dueDate: '2026-11-15',
-    priority: 'Alta',
-    status: 'Pending',
-    assignee: 'team',
-    assigneeName: 'Dra. Lucía Ramírez',
-  },
-  {
-    id: 'T-107',
-    title: 'Documentar API pública de simulación',
-    phase: 'Transferencia',
-    dueDate: '2026-12-02',
-    priority: 'Baja',
-    status: 'Pending',
-    assignee: 'me',
-  },
-];
-
-export const PROJECT_DOCUMENTS: DashboardDocument[] = [
-  {
-    id: 'DOC-301',
-    name: 'Protocolo_Metodologico_v3.pdf',
-    type: 'Metodología',
-    size: '2.4 MB',
-    uploadedAt: '2026-10-12',
-    visibility: 'Shared_with_administration',
-    status: 'Aprobado',
-  },
-  {
-    id: 'DOC-302',
-    name: 'Informe_Tecnico_Trimestral_I.pdf',
-    type: 'Resultados',
-    size: '5.1 MB',
-    uploadedAt: '2026-10-08',
-    visibility: 'Shared_with_administration',
-    status: 'En revisión',
-  },
-  {
-    id: 'DOC-303',
-    name: 'Evidencia_Simulacion_RedPiloto.zip',
-    type: 'Evidencia',
-    size: '18.7 MB',
-    uploadedAt: '2026-09-28',
-    visibility: 'Team_only',
-    status: 'Vigente',
-  },
-  {
-    id: 'DOC-304',
-    name: 'Convenio_Fondos_2026.pdf',
-    type: 'Justificación',
-    size: '1.2 MB',
-    uploadedAt: '2026-10-02',
-    visibility: 'Team_only',
-    status: 'Vigente',
-    piOnly: true,
-  },
-  {
-    id: 'DOC-305',
-    name: 'Abstract_Congreso_ENERGIA2026.pdf',
-    type: 'Resumen',
-    size: '480 KB',
-    uploadedAt: '2026-09-21',
-    visibility: 'Shared_with_administration',
-    status: 'Aprobado',
-  },
-  {
-    id: 'DOC-306',
-    name: 'Aprobacion_Comite_Etico.pdf',
-    type: 'Ética',
-    size: '320 KB',
-    uploadedAt: '2026-09-15',
-    visibility: 'Shared_with_administration',
-    status: 'Aprobado',
-  },
-];
-
-/**
- * RF-001 / RF-005: el estudiante solo ve las tareas que tiene asignadas y
- * los documentos del equipo; los expedientes reservados son del PI.
- */
-export function visibleTasks(
-  role: PlatformRole,
-  tasks: DashboardTask[],
-): DashboardTask[] {
-  if (role === 'PRINCIPAL_INVESTIGATOR') {
-    return tasks;
-  }
-  return tasks.filter((task) => task.assignee === 'me');
-}
-
-export function visibleDocuments(
-  role: PlatformRole,
-  documents: DashboardDocument[],
-): DashboardDocument[] {
-  if (role === 'PRINCIPAL_INVESTIGATOR') {
-    return documents;
-  }
-  return documents.filter((document) => !document.piOnly);
 }
 
 export function countByStatus(tasks: DashboardTask[]) {

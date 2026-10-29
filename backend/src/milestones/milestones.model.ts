@@ -10,6 +10,7 @@ export class MilestoneGql {
   @Field(() => ID) projectId!: number;
   @Field() name!: string;
   @Field(() => ID) assigneeId!: string;
+  @Field() assigneeName!: string;
   @Field(() => GraphQLISODateTime) dueDate!: Date;
   @Field(() => MilestoneStatus) status!: MilestoneStatus;
 }

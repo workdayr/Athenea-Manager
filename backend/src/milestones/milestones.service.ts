@@ -3,6 +3,7 @@ import { prisma } from '../db/prisma.js';
 import type { AuthenticatedUser } from '../projects/session.guard.js';
 import { GraphQLError } from 'graphql';
 import { uploadEvidenceDocument } from '../document_upload/document-upload.service.js';
+import { assertProjectWritable } from '../projects/project-write-guard.js';
 
 @Injectable()
 export class MilestonesService {
@@ -13,7 +14,20 @@ export class MilestonesService {
     if (user.role === 'STUDENT') {
       where.assignee_id = user.id;
     }
-    return prisma.milestone.findMany({ where });
+    const rows = await prisma.milestone.findMany({
+      where,
+      include: { assignee: { select: { name: true } } },
+    });
+    // GraphQL expone camelCase; Prisma devuelve columnas snake_case.
+    return rows.map((row) => ({
+      milestoneId: row.milestone_id,
+      projectId: row.project_id,
+      name: row.name,
+      assigneeId: row.assignee_id,
+      assigneeName: row.assignee.name,
+      dueDate: row.due_date,
+      status: row.status,
+    }));
   }
 
   // US 5.2: Subir evidencia y completar (Transaccional)
@@ -26,6 +40,18 @@ export class MilestonesService {
     if (milestone.assignee_id !== user.id) {
       throw new GraphQLError('Solo el usuario asignado puede subir evidencia a esta tarea.', { extensions: { code: 'FORBIDDEN' } });
     }
+
+    // RF-020: si el proyecto fue archivado, el hito y su evidencia son inmutables.
+    const project = await prisma.project.findUnique({
+      where: { project_id: milestone.project_id },
+      select: { is_read_only: true },
+    });
+    if (!project) {
+      throw new GraphQLError('Proyecto no encontrado.', {
+        extensions: { code: 'NOT_FOUND' },
+      });
+    }
+    assertProjectWritable(project);
 
     // 1. Subimos el archivo reutilizando el código de tu compañero
     const document = await uploadEvidenceDocument(user, milestone.project_id, file, ip);

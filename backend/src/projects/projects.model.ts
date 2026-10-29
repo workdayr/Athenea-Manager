@@ -1,5 +1,6 @@
 import {
   Field,
+  Float,
   ID,
   InputType,
   Int,
@@ -9,6 +10,7 @@ import {
 import { GraphQLISODateTime } from '@nestjs/graphql';
 
 export enum ProjectStatusGql {
+  Draft = 'Draft',
   Proposed = 'Proposed',
   Under_Review = 'Under_Review',
   Approved = 'Approved',
@@ -20,6 +22,16 @@ export enum ProjectStatusGql {
 }
 
 registerEnumType(ProjectStatusGql, { name: 'ProjectStatus' });
+
+@ObjectType()
+export class ProjectTeamMemberGql {
+  @Field()
+  name!: string;
+
+  /** Valor del enum `ProjectRole` de Prisma (p. ej. Principal_Investigator). */
+  @Field()
+  role!: string;
+}
 
 @ObjectType()
 export class ProjectGql {
@@ -43,6 +55,38 @@ export class ProjectGql {
 
   @Field(() => Int, { nullable: true })
   callId!: number | null;
+
+  /** Nombre del investigador principal registrado en el proyecto. */
+  @Field(() => String, { nullable: true })
+  piName!: string | null;
+
+  /** Titulo real de la convocatoria asociada. */
+  @Field(() => String, { nullable: true })
+  callTitle!: string | null;
+
+  @Field(() => [ProjectTeamMemberGql])
+  team!: ProjectTeamMemberGql[];
+
+  @Field(() => Int)
+  milestonesTotal!: number;
+
+  @Field(() => Int)
+  milestonesCompleted!: number;
+
+  @Field()
+  budgetEnabled!: boolean;
+
+  /** Gasto real del proyecto; null para roles sin acceso presupuestal. */
+  @Field(() => Float, { nullable: true })
+  budgetSpent!: number | null;
+
+  /** RF-020: proyecto archivado; toda escritura queda bloqueada. */
+  @Field()
+  isReadOnly!: boolean;
+
+  /** RF-020: fecha en que se congelo el expediente. */
+  @Field(() => GraphQLISODateTime, { nullable: true })
+  archivedAt!: Date | null;
 }
 
 @InputType()

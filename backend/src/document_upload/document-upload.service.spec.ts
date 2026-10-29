@@ -115,6 +115,21 @@ describe('uploadEvidenceDocument (RF-016, RNF-005)', () => {
     });
   });
 
+  it('rechaza proyecto archivado en solo lectura (RF-020)', async () => {
+    (prisma.project.findUnique as any).mockResolvedValue({
+      ...projectRow,
+      status: 'Active',
+      is_read_only: true,
+    });
+    await expect(
+      uploadEvidenceDocument(user, 1, validFile, '10.0.0.1'),
+    ).rejects.toMatchObject({
+      code: DOCUMENT_ERROR_CODES.PROJECT_READ_ONLY,
+      httpStatus: 409,
+    });
+    expect(prisma.projectDocument.create).not.toHaveBeenCalled();
+  });
+
   it('rechaza extension no permitida', async () => {
     await expect(
       uploadEvidenceDocument(

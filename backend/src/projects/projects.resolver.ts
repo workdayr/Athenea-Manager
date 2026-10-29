@@ -7,9 +7,9 @@ import { RolesGuard } from '../auth/roles.guard.js';
 import { CurrentUser } from './current-user.decorator.js';
 import {
   ProjectGql,
-  ProjectStatusGql,
   RegisterProjectInput,
 } from './projects.model.js';
+import { toProjectGql, type ProjectRow } from './projects.mapper.js';
 import {
   activeProjectCount,
   myProjects,
@@ -17,28 +17,6 @@ import {
   registerProject,
 } from './projects.service.js';
 import { SessionGuard, type AuthenticatedUser } from './session.guard.js';
-
-interface ProjectRow {
-  project_id: number;
-  title: string;
-  objectives: string;
-  start_date: Date;
-  end_date: Date;
-  status: string;
-  call_id: number | null;
-}
-
-function toGql(row: ProjectRow): ProjectGql {
-  const project = new ProjectGql();
-  project.projectId = row.project_id;
-  project.title = row.title;
-  project.objectives = row.objectives;
-  project.startDate = row.start_date;
-  project.endDate = row.end_date;
-  project.status = row.status as ProjectStatusGql;
-  project.callId = row.call_id;
-  return project;
-}
 
 function toGraphQLError(error: unknown): never {
   if (error instanceof ProjectError) {
@@ -86,7 +64,7 @@ export class ProjectsResolver {
         endDate: input.endDate,
         callId: input.callId,
       })) as unknown as ProjectRow;
-      return toGql(row);
+      return toProjectGql(row, user);
     } catch (error) {
       toGraphQLError(error);
     }
@@ -97,7 +75,7 @@ export class ProjectsResolver {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<ProjectGql[]> {
     const rows = (await myProjects(user)) as unknown as ProjectRow[];
-    return rows.map(toGql);
+    return rows.map((row) => toProjectGql(row, user));
   }
 
   /** Cupo del PI para el banner "N de 3 activos" (BR-002). */

@@ -15,6 +15,7 @@ import {
   validatePdfUpload,
   validateRegisterProjectInput,
 } from './projects.policy.js';
+import { assertProjectWritable } from './project-write-guard.js';
 import type { AuthenticatedUser } from './session.guard.js';
 
 /** Error de dominio: se mapea a GraphQL (extensions.code) o a HTTP. */
@@ -124,6 +125,17 @@ export async function registerProject(
         create: { user_id: user.id, project_role: 'Principal_Investigator' },
       },
     },
+    include: {
+      call: { select: { title: true } },
+      projectUsers: {
+        select: {
+          project_role: true,
+          user: { select: { name: true } },
+        },
+      },
+      milestones: { select: { status: true } },
+      expenses: { select: { amount: true } },
+    },
   });
 }
 
@@ -132,6 +144,17 @@ export function myProjects(user: AuthenticatedUser) {
   return prisma.project.findMany({
     where: { projectUsers: { some: { user_id: user.id } } },
     orderBy: { project_id: 'desc' },
+    include: {
+      call: { select: { title: true } },
+      projectUsers: {
+        select: {
+          project_role: true,
+          user: { select: { name: true } },
+        },
+      },
+      milestones: { select: { status: true } },
+      expenses: { select: { amount: true } },
+    },
   });
 }
 
@@ -200,6 +223,9 @@ export async function uploadProjectDocument(
       403,
     );
   }
+
+  // RF-020: el archivo institucional es inmutable.
+  assertProjectWritable(project as { is_read_only?: boolean | null });
 
   // 🚨 CORRECCIÓN (Obs 8): Ahora el proyecto nace en 'Draft', no en 'Proposed'
   if ((project as { status: string }).status !== 'Draft') {

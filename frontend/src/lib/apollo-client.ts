@@ -106,6 +106,11 @@ export interface RegisterProjectResult {
   };
 }
 
+export interface MyProjectTeamMember {
+  name: string;
+  role: string;
+}
+
 export interface MyProjectSummary {
   projectId: string;
   title: string;
@@ -114,6 +119,16 @@ export interface MyProjectSummary {
   endDate: string;
   status: string;
   callId: number | null;
+  piName: string | null;
+  callTitle: string | null;
+  team: MyProjectTeamMember[];
+  milestonesTotal: number;
+  milestonesCompleted: number;
+  budgetEnabled: boolean;
+  budgetSpent: number | null;
+  /** RF-020: el proyecto esta archivado en modo solo lectura. */
+  isReadOnly: boolean;
+  archivedAt: string | null;
 }
 
 export const MY_PROJECTS_QUERY = gql`
@@ -126,6 +141,18 @@ export const MY_PROJECTS_QUERY = gql`
       endDate
       status
       callId
+      piName
+      callTitle
+      team {
+        name
+        role
+      }
+      milestonesTotal
+      milestonesCompleted
+      budgetEnabled
+      budgetSpent
+      isReadOnly
+      archivedAt
     }
   }
 `;

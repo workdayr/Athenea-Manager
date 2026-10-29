@@ -12,6 +12,7 @@ import { ROLES } from '../auth/roles.constants.js';
 import { Roles } from '../auth/roles.decorator.js';
 import { RolesGuard } from '../auth/roles.guard.js';
 import { CurrentUser } from '../projects/current-user.decorator.js';
+import { ProjectReadOnlyError } from '../projects/project-write-guard.js';
 import {
   SessionGuard,
   type AuthenticatedUser,
@@ -43,7 +44,10 @@ function toGql(row: ProjectDocumentView): ProjectDocumentGql {
 }
 
 function toGraphQLError(error: unknown): never {
-  if (error instanceof DocumentVisibilityError) {
+  if (
+    error instanceof DocumentVisibilityError ||
+    error instanceof ProjectReadOnlyError
+  ) {
     throw new GraphQLError(error.message, {
       extensions: { code: error.code, field: error.field ?? null },
     });

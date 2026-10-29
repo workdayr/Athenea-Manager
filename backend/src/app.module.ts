@@ -3,12 +3,14 @@ import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
 import { GraphQLModule } from '@nestjs/graphql';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
+import { ArchiveModule } from './archive/archive.module.js';
 import { CallsModule } from './calls/calls.module.js';
 import { DocumentUploadModule } from './document_upload/document-upload.module.js';
 import { DocumentsModule } from './documents/documents.module.js';
 import { ProposalEvaluationModule } from './proposal_evaluation/proposal-evaluation.module.js';
 import { ProjectsModule } from './projects/projects.module.js';
 import { MilestonesModule } from './milestones/milestones.module.js';
+import { ReportingModule } from './reporting/reporting.module.js';
 @Module({
   imports: [
     GraphQLModule.forRoot<ApolloDriverConfig>({
@@ -33,6 +35,8 @@ import { MilestonesModule } from './milestones/milestones.module.js';
     DocumentUploadModule,
     DocumentsModule,
     MilestonesModule,
+    ReportingModule,
+    ArchiveModule,
   ],
   controllers: [AppController],
   providers: [AppService],

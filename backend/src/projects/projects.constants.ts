@@ -52,4 +52,6 @@ export const PROJECT_ERROR_CODES = {
   CONFLICT: 'CONFLICT',
   PAYLOAD_TOO_LARGE: 'PAYLOAD_TOO_LARGE',
   UNSUPPORTED_MEDIA_TYPE: 'UNSUPPORTED_MEDIA_TYPE',
+  /** RF-020: el proyecto esta archivado y no admite escrituras. */
+  PROJECT_READ_ONLY: 'PROJECT_READ_ONLY',
 } as const;
