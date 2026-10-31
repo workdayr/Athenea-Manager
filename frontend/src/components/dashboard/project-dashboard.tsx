@@ -39,6 +39,8 @@ import {
   type MyProjectSummary,
 } from '@/lib/apollo-client';
 import { GET_MILESTONES_QUERY, uploadMilestoneEvidence } from '@/lib/milestones';
+import { MilestonePlanner } from '@/components/dashboard/milestone-planner';
+import { OverdueTasks } from '@/components/dashboard/overdue-tasks';
 
 type TaskFilter = 'all' | TaskStatus;
 
@@ -68,6 +70,7 @@ interface MilestoneData {
   name: string;
   status: string;
   dueDate: string;
+  createdAt: string;
   assigneeId: string;
   assigneeName: string;
 }
@@ -150,6 +153,7 @@ export function ProjectDashboard({
         ? 'Pending'
         : milestone.status) as TaskStatus,
       dueDate: milestone.dueDate,
+      createdAt: milestone.createdAt,
       assignee: milestone.assigneeId === user.id ? 'me' : 'team',
       assigneeName:
         milestone.assigneeId === user.id
@@ -662,7 +666,16 @@ export function ProjectDashboard({
           </p>
         </section>
       </div>
+      <OverdueTasks tasks={tasks} />
 
+      {user.role === 'PRINCIPAL_INVESTIGATOR' &&
+        !isReadOnly &&
+        realProjectId !== null && (
+          <MilestonePlanner
+            projectId={realProjectId}
+            onCreated={() => void refetchTasks()}
+          />
+       )}
       <section className="rounded-xl border border-line bg-white shadow-[0_1px_2px_rgba(16,35,61,0.04)]">
         <div className="flex flex-wrap items-start justify-between gap-3 px-5 pt-5">
           <div>
@@ -1021,6 +1034,7 @@ function TaskRow({
         </p>
         <p className="mt-0.5 text-[10px] text-muted">
           {task.id} · {assignee}
+          {task.createdAt && ` · creada el ${formatDate(task.createdAt)}`}
         </p>
       </div>
 

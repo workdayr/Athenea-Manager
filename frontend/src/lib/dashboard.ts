@@ -334,6 +334,7 @@ export interface DashboardTask {
   id: string;
   title: string;
   dueDate: string;
+  createdAt?: string;
   status: TaskStatus;
   /** `me` = usuario activo; `team` = otro miembro del equipo. */
   assignee: 'me' | 'team';

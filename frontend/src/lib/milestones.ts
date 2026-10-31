@@ -7,6 +7,7 @@ export const GET_MILESTONES_QUERY = gql`
       milestoneId
       name
       dueDate
+      createdAt
       status
       assigneeId
       assigneeName

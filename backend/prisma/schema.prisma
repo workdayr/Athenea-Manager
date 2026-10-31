@@ -284,6 +284,7 @@ model Milestone {
   name            String          @db.VarChar(150)
   // CAMBIO: String en lugar de Int
   assignee_id     String
+  created_at      DateTime        @default(now()) @db.Timestamp()
   due_date        DateTime        @db.Date
   status          MilestoneStatus @default(Pending)
 
