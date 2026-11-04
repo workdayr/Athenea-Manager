@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
@@ -38,7 +38,7 @@ import {
   MY_PROJECTS_QUERY,
   type MyProjectSummary,
 } from '@/lib/apollo-client';
-import { GET_MILESTONES_QUERY, uploadMilestoneEvidence } from '@/lib/milestones';
+import { GET_MILESTONES_QUERY, uploadMilestoneEvidence, confirmMilestoneEvidence } from '@/lib/milestones';
 
 type TaskFilter = 'all' | TaskStatus;
 
@@ -89,6 +89,7 @@ export function ProjectDashboard({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [taskFilter, setTaskFilter] = useState<TaskFilter>('all');
   const [uploadingTask, setUploadingTask] = useState<string | null>(null);
+  const [confirmingTask, setConfirmingTask] = useState<string | null>(null);
 
   // El cliente se memoiza: `getApolloClient()` crea una instancia nueva en
   // cada llamada y pasarla a `useQuery` en cada render provoca un bucle de
@@ -267,7 +268,7 @@ export function ProjectDashboard({
     setUploadingTask(`MS-${milestoneId}`);
     try {
       await uploadMilestoneEvidence(milestoneId, file);
-      alert('Evidencia subida y tarea completada con éxito.');
+      alert('Evidencia subida. La tarea queda pendiente de confirmación por el Investigador Principal.');
       refetchTasks();
     } catch (err: unknown) {
       const message =
@@ -275,6 +276,25 @@ export function ProjectDashboard({
       alert(message);
     } finally {
       setUploadingTask(null);
+    }
+  };
+
+  const handleConfirmMilestone = async (milestoneId: number) => {
+    if (isReadOnly) {
+      alert('El proyecto está archivado en modo solo lectura (RF-020).');
+      return;
+    }
+    setConfirmingTask(`MS-${milestoneId}`);
+    try {
+      await confirmMilestoneEvidence(milestoneId);
+      alert('Tarea confirmada y marcada como Completada.');
+      refetchTasks();
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : 'Error al confirmar la tarea';
+      alert(message);
+    } finally {
+      setConfirmingTask(null);
     }
   };
 
@@ -625,6 +645,9 @@ export function ProjectDashboard({
                 userName={user.name} 
                 onUpload={handleUploadEvidence}
                 uploading={uploadingTask === task.id}
+                onConfirm={handleConfirmMilestone}
+                confirming={confirmingTask === task.id}
+                isPi={user.role === 'PRINCIPAL_INVESTIGATOR'}
                 readOnly={isReadOnly}
               />
             ))}
@@ -975,25 +998,33 @@ function TaskSummaryTile({
   );
 }
 
-// 🚨 COMPONENTE ACTUALIZADO CON BOTÓN DE SUBIDA
-function TaskRow({ 
-  task, 
-  userName, 
-  onUpload, 
+/// Componente de fila de tarea con acciones de evidencia y confirmacion
+function TaskRow({
+  task,
+  userName,
+  onUpload,
   uploading,
+  onConfirm,
+  confirming,
+  isPi,
   readOnly,
-}: { 
-  task: DashboardTask; 
-  userName: string; 
-  onUpload: (id: number, file: File) => void; 
-  uploading: boolean; 
+}: {
+  task: DashboardTask;
+  userName: string;
+  onUpload: (id: number, file: File) => void;
+  uploading: boolean;
+  onConfirm: (id: number) => void;
+  confirming: boolean;
+  isPi: boolean;
   readOnly: boolean;
 }) {
   const due = formatDate(task.dueDate);
   const assignee =
     task.assignee === 'me'
-      ? `Tú (${firstName(userName)})`
+      ? `Tu (${firstName(userName)})`
       : task.assigneeName;
+  const milestoneNumericId = Number(task.id.replace('MS-', ''));
+  const isRealMilestone = task.id.startsWith('MS-');
 
   return (
     <li className="flex items-start gap-3 rounded-lg border border-line/80 px-3 py-2.5 transition hover:border-brand-200 hover:bg-[#fafbfe]">
@@ -1020,7 +1051,7 @@ function TaskRow({
           {task.title}
         </p>
         <p className="mt-0.5 text-[10px] text-muted">
-          {task.id} · {assignee}
+          {task.id} &middot; {assignee}
         </p>
       </div>
 
@@ -1032,14 +1063,16 @@ function TaskRow({
           {TASK_STATUS_LABELS[task.status]}
         </span>
 
-        {/* Botón de subir evidencia (solo si es una tarea real, no está completada y el proyecto no está archivado) */}
-        {readOnly && task.status !== 'Completed' && task.id.startsWith('MS-') && (
+        {/* Proyecto archivado: mostrar etiqueta solo lectura */}
+        {readOnly && task.status !== 'Completed' && isRealMilestone && (
           <span className="mt-1 inline-flex items-center gap-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-medium text-amber-800">
             <Icon name="stamp" className="h-3 w-3" />
             Solo lectura
           </span>
         )}
-        {!readOnly && task.status !== 'Completed' && task.id.startsWith('MS-') && (
+
+        {/* Boton de subir evidencia: visible para el asignado si no esta Completed y no es readOnly */}
+        {!readOnly && task.assignee === 'me' && task.status !== 'Completed' && isRealMilestone && (
           <div className="mt-1">
             <input
               type="file"
@@ -1047,8 +1080,7 @@ function TaskRow({
               className="hidden"
               onChange={(e) => {
                 const file = e.target.files?.[0];
-                if (file) onUpload(Number(task.id.replace('MS-', '')), file);
-                // Limpiar input para permitir subir el mismo archivo si se requiere
+                if (file) onUpload(milestoneNumericId, file);
                 e.target.value = '';
               }}
               disabled={uploading}
@@ -1063,6 +1095,21 @@ function TaskRow({
               {uploading ? 'Subiendo...' : 'Evidencia'}
             </label>
           </div>
+        )}
+
+        {/* Boton Confirmar: solo para el PI, en tareas no-Completed, no readOnly */}
+        {!readOnly && isPi && task.status !== 'Completed' && isRealMilestone && (
+          <button
+            type="button"
+            onClick={() => onConfirm(milestoneNumericId)}
+            disabled={confirming}
+            className={`mt-1 inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-medium text-emerald-700 hover:bg-emerald-100 transition ${
+              confirming ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
+          >
+            <Icon name="check" className="h-3 w-3" />
+            {confirming ? 'Confirmando...' : 'Confirmar'}
+          </button>
         )}
       </div>
     </li>
