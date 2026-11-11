@@ -132,6 +132,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: 'Asistente Virtual RAG',
     subtitle: 'Consulta documental asistida',
     icon: 'ai',
+    href: '/assistant',
     roles: EVERYONE,
   },
   {
