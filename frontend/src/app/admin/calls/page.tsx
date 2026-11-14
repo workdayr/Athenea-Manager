@@ -150,7 +150,7 @@ export default function AdminCallsPage() {
     }
     setWorkingId(call.callId);
     try {
-      await publishCall(call.callId);
+      await publishCall(Number(call.callId));
       toast.success('La convocatoria está abierta.', 'Convocatoria publicada');
       await reload();
     } catch (error) {
@@ -178,7 +178,7 @@ export default function AdminCallsPage() {
     }
     setWorkingId(call.callId);
     try {
-      await closeCall(call.callId);
+      await closeCall(Number(call.callId));
       toast.success('La convocatoria quedó cerrada.', 'Convocatoria cerrada');
       await reload();
     } catch (error) {

@@ -93,7 +93,7 @@ export async function fetchCalls(status?: CallStatus): Promise<Call[]> {
 export async function fetchCall(callId: number): Promise<Call | null> {
   const result = await getApolloClient().query<{ call: Call | null }>({
     query: CALL_QUERY,
-    variables: { callId },
+    variables: { callId: Number(callId) },
     fetchPolicy: 'network-only',
   });
   return result.data?.call ?? null;
@@ -118,12 +118,12 @@ export async function createCall(input: {
 
 async function runCallMutation(
   mutation: typeof PUBLISH_CALL_MUTATION | typeof CLOSE_CALL_MUTATION,
-  callId: number,
+  callId: number | string,
   field: 'publishCall' | 'closeCall',
 ): Promise<Call> {
   const result = await getApolloClient().mutate<Record<string, Call>>({
     mutation,
-    variables: { callId },
+    variables: { callId: Number(callId) },
   });
   const call = result.data?.[field];
   if (!call) {
@@ -132,11 +132,11 @@ async function runCallMutation(
   return call;
 }
 
-export async function publishCall(callId: number): Promise<Call> {
+export async function publishCall(callId: number | string): Promise<Call> {
   return runCallMutation(PUBLISH_CALL_MUTATION, callId, 'publishCall');
 }
 
-export async function closeCall(callId: number): Promise<Call> {
+export async function closeCall(callId: number | string): Promise<Call> {
   return runCallMutation(CLOSE_CALL_MUTATION, callId, 'closeCall');
 }
 
