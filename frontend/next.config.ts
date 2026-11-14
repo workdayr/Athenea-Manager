@@ -38,6 +38,16 @@ const nextConfig: NextConfig = {
         source: "/api/documents/:path*",
         destination: `${backendURL}/documents/:path*`,
       },
+      // F1-10: Descarga del dictamen PDF (RF-019)
+      {
+        source: "/api/decisions/:path*",
+        destination: `${backendURL}/decisions/:path*`,
+      },
+      // F2-05: Exportacion de reportes CSV/PDF (RF-008)
+      {
+        source: "/api/reports/:path*",
+        destination: `${backendURL}/reports/:path*`,
+      },
     ];
   },
 };

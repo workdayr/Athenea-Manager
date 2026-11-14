@@ -5,6 +5,43 @@ import {
   ObjectType,
 } from '@nestjs/graphql';
 import { GraphQLISODateTime } from '@nestjs/graphql';
+import { PageInfoGql } from '../common/pagination/pagination.model.js';
+
+@ObjectType()
+export class ArchivedProjectGql {
+  @Field(() => Int)
+  projectId!: number;
+
+  @Field()
+  title!: string;
+
+  @Field()
+  status!: string;
+
+  @Field(() => GraphQLISODateTime)
+  archivedAt!: Date;
+
+  @Field()
+  snapshotHash!: string;
+}
+
+@ObjectType()
+export class ArchivedProjectPageGql {
+  @Field(() => [ArchivedProjectGql])
+  items!: ArchivedProjectGql[];
+
+  @Field(() => Int)
+  total!: number;
+
+  @Field(() => Int)
+  page!: number;
+
+  @Field(() => Int)
+  pageSize!: number;
+
+  @Field(() => PageInfoGql)
+  pageInfo!: PageInfoGql;
+}
 
 @ObjectType()
 export class ArchiveAlertGql {

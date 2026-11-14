@@ -20,6 +20,11 @@ services:
       # RF-014: correo saliente hacia Mailpit (captura local, sin relay).
       SMTP_HOST: mailpit
       SMTP_PORT: "1025"
+      # F1-08: los archivos subidos deben sobrevivir a los reinicios y
+      # entrar en el respaldo (ver docker/backup/README.md).
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      - uploads:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -114,3 +119,4 @@ services:
 
 volumes:
   pgdata:
+  uploads:

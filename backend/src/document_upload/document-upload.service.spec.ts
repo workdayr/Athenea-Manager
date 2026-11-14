@@ -42,7 +42,7 @@ const projectRow = {
   project_id: 1,
   title: 'Proyecto equipo',
   status: 'Proposed',
-} as unknown;
+};
 
 beforeEach(() => {
   vi.resetAllMocks();

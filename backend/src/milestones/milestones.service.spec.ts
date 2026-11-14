@@ -90,6 +90,9 @@ describe('getMilestones (RF-001/RF-006)', () => {
     });
     expect(prismaMock.milestone.findMany).toHaveBeenCalledWith({
       where: { project_id: 10 },
+      orderBy: { due_date: 'asc' },
+      skip: 0,
+      take: 50,
       include: { assignee: { select: { name: true } } },
     });
     expect(rows).toHaveLength(1);
@@ -105,6 +108,9 @@ describe('getMilestones (RF-001/RF-006)', () => {
 
     expect(prismaMock.milestone.findMany).toHaveBeenCalledWith({
       where: { project_id: 10, assignee_id: 'student-1' },
+      orderBy: { due_date: 'asc' },
+      skip: 0,
+      take: 50,
       include: { assignee: { select: { name: true } } },
     });
   });
@@ -153,6 +159,7 @@ describe('confirmMilestone (RF-014)', () => {
     expect(txMock.milestone.update).toHaveBeenCalledWith({
       where: { milestone_id: 1 },
       data: { status: 'Completed' },
+      include: { assignee: { select: { name: true } } },
     });
     expect(txMock.notification.create).toHaveBeenCalledWith({
       data: expect.objectContaining({

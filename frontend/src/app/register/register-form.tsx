@@ -77,14 +77,28 @@ export function RegisterForm({
       email: email.trim(),
       password,
     });
-    setLoading(false);
     if (signUpError) {
+      setLoading(false);
       toast.error(
         mapAuthError(
           signUpError,
           'No fue posible crear la cuenta. Intenta de nuevo.',
         ),
         'No se pudo crear la cuenta',
+      );
+      return;
+    }
+    // F1-06 / RF-010: si la verificacion de correo es obligatoria el alta
+    // no crea sesion; en ese caso se lleva al usuario a /verify-email.
+    const { data: sessionData } = await authClient.getSession();
+    setLoading(false);
+    if (!sessionData?.user) {
+      toast.info(
+        'Revisa tu correo institucional y confirma tu cuenta para iniciar sesión.',
+        'Cuenta creada',
+      );
+      router.push(
+        `/verify-email?email=${encodeURIComponent(email.trim())}`,
       );
       return;
     }

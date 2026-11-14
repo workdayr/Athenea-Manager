@@ -128,12 +128,20 @@ export function LoginForm({
               </div>
 
               <div>
-                <label
-                  htmlFor="password"
-                  className="mb-1 block text-sm font-medium text-gray-700"
-                >
-                  Contraseña
-                </label>
+                <div className="mb-1 flex items-baseline justify-between">
+                  <label
+                    htmlFor="password"
+                    className="block text-sm font-medium text-gray-700"
+                  >
+                    Contraseña
+                  </label>
+                  <Link
+                    href="/forgot-password"
+                    className="text-xs font-medium text-blue-600 hover:underline"
+                  >
+                    ¿Olvidaste tu contraseña?
+                  </Link>
+                </div>
                 <input
                   id="password"
                   name="password"
@@ -183,6 +191,16 @@ export function LoginForm({
           ¿No tienes cuenta?{' '}
           <Link href="/register" className="font-medium text-blue-600 hover:underline">
             Regístrate
+          </Link>
+        </p>
+
+        <p className="mt-2 text-center text-sm text-gray-600">
+          ¿Aún no verificas tu correo?{' '}
+          <Link
+            href="/verify-email"
+            className="font-medium text-blue-600 hover:underline"
+          >
+            Reenviar verificación
           </Link>
         </p>
       </section>

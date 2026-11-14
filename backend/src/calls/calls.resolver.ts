@@ -4,6 +4,7 @@ import { GraphQLError } from 'graphql';
 import { ROLES } from '../auth/roles.constants.js';
 import { Roles } from '../auth/roles.decorator.js';
 import { RolesGuard } from '../auth/roles.guard.js';
+import { SortDirectionGql } from '../common/pagination/pagination.model.js';
 import { CurrentUser } from '../projects/current-user.decorator.js';
 import {
   SessionGuard,
@@ -11,6 +12,7 @@ import {
 } from '../projects/session.guard.js';
 import { remainingCallSlots } from './calls.policy.js';
 import {
+  allCalls,
   CallError,
   closeCall,
   closeExpiredCalls,
@@ -134,9 +136,43 @@ export class CallsResolver {
     return closeExpiredCalls();
   }
 
+  /**
+   * F1-09: historial completo (abiertas y cerradas) para /calls.
+   * Los borradores quedan reservados a ADMINISTRATOR.
+   */
   @Query(() => [CallGql])
-  async openCalls(): Promise<CallGql[]> {
-    const rows = (await openCalls()) as unknown as CallRow[];
+  async calls(
+    @Args('status', { type: () => CallStatusGql, nullable: true })
+    status: CallStatusGql | undefined,
+    @CurrentUser() user: AuthenticatedUser,
+    @Args('page', { type: () => Int, nullable: true }) page?: number,
+    @Args('pageSize', { type: () => Int, nullable: true }) pageSize?: number,
+    @Args('sortBy', { type: () => String, nullable: true }) sortBy?: string,
+    @Args('sortDir', { type: () => SortDirectionGql, nullable: true })
+    sortDir?: SortDirectionGql,
+  ): Promise<CallGql[]> {
+    const rows = (await allCalls(
+      status ?? null,
+      user.role === ROLES.ADMINISTRATOR,
+      { page, pageSize, sortBy, sortDir },
+    )) as unknown as CallRow[];
+    return rows.map(toGql);
+  }
+
+  @Query(() => [CallGql])
+  async openCalls(
+    @Args('page', { type: () => Int, nullable: true }) page?: number,
+    @Args('pageSize', { type: () => Int, nullable: true }) pageSize?: number,
+    @Args('sortBy', { type: () => String, nullable: true }) sortBy?: string,
+    @Args('sortDir', { type: () => SortDirectionGql, nullable: true })
+    sortDir?: SortDirectionGql,
+  ): Promise<CallGql[]> {
+    const rows = (await openCalls(new Date(), {
+      page,
+      pageSize,
+      sortBy,
+      sortDir,
+    })) as unknown as CallRow[];
     return rows.map(toGql);
   }
 

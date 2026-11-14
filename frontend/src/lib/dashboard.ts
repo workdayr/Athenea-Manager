@@ -118,6 +118,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: 'Proyectos Activos e Hitos',
     subtitle: 'Seguimiento de entregables',
     icon: 'milestones',
+    href: '/projects',
     roles: EVERYONE,
   },
   {
@@ -125,7 +126,16 @@ export const NAV_ITEMS: NavItem[] = [
     label: 'Convocatorias Institucionales',
     subtitle: 'Ciclo de fondos y cupos',
     icon: 'calls',
+    href: '/calls',
     roles: EVERYONE,
+  },
+  {
+    id: 'usuarios',
+    label: 'Usuarios y Roles',
+    subtitle: 'Administración de cuentas RF-001',
+    icon: 'users',
+    href: '/admin/users',
+    roles: ['ADMINISTRATOR'],
   },
   {
     id: 'rag',
@@ -140,6 +150,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: 'Configuración y Auditoría',
     subtitle: 'Roles y bitácora del sistema',
     icon: 'config',
+    href: '/admin/audit',
     roles: ['ADMINISTRATOR', 'COORDINATOR'],
   },
 ];

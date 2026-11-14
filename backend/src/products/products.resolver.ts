@@ -11,6 +11,7 @@ import { GraphQLError } from 'graphql';
 import { ROLES } from '../auth/roles.constants.js';
 import { Roles } from '../auth/roles.decorator.js';
 import { RolesGuard } from '../auth/roles.guard.js';
+import { SortDirectionGql } from '../common/pagination/pagination.model.js';
 import { CurrentUser } from '../projects/current-user.decorator.js';
 import { ProjectReadOnlyError } from '../projects/project-write-guard.js';
 import {
@@ -92,9 +93,19 @@ export class ProductsResolver {
   @Query(() => [ResearchProductGql])
   async projectProducts(
     @Args('projectId', { type: () => Int }) projectId: number,
+    @Args('page', { type: () => Int, nullable: true }) page?: number,
+    @Args('pageSize', { type: () => Int, nullable: true }) pageSize?: number,
+    @Args('sortBy', { type: () => String, nullable: true }) sortBy?: string,
+    @Args('sortDir', { type: () => SortDirectionGql, nullable: true })
+    sortDir?: SortDirectionGql,
   ): Promise<ResearchProductGql[]> {
     try {
-      const views = await getProjectProducts(projectId);
+      const views = await getProjectProducts(projectId, {
+        page,
+        pageSize,
+        sortBy,
+        sortDir,
+      });
       return views.map(toProductGql);
     } catch (error) {
       toGraphQLError(error);

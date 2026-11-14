@@ -1,9 +1,24 @@
 import { Injectable } from '@nestjs/common';
 import { prisma } from '../db/prisma.js';
 import {
+  buildPageInfo,
+  normalizePageArgs,
+  orderByFrom,
+  type PageArgs,
+  type PageInfo,
+} from '../common/pagination/pagination.policy.js';
+import {
   normalizeAuditQuery,
   type AuditFilters,
 } from './audit.policy.js';
+
+/** F2-03: campos de ordenamiento de la bitacora. */
+const AUDIT_SORT_FIELDS = ['timestamp', 'action', 'actorId'] as const;
+const AUDIT_SORT_COLUMNS: Record<string, string> = {
+  timestamp: 'timestamp',
+  action: 'action',
+  actorId: 'actor_id',
+};
 
 export interface AuditLogRow {
   log_id: number;
@@ -28,6 +43,7 @@ export interface AuditLogPage {
   total: number;
   page: number;
   pageSize: number;
+  pageInfo: PageInfo;
 }
 
 @Injectable()
@@ -37,14 +53,27 @@ export class AuditService {
     filters: AuditFilters = {},
     page = 1,
     pageSize = 20,
+    paging: PageArgs = {},
   ): Promise<AuditLogPage> {
-    const normalized = normalizeAuditQuery(filters, page, pageSize);
+    const ordering = normalizePageArgs(
+      { ...paging, page, pageSize },
+      AUDIT_SORT_FIELDS,
+      { sortBy: 'timestamp', sortDir: 'desc' },
+    );
+    const normalized = normalizeAuditQuery(
+      filters,
+      ordering.page,
+      ordering.pageSize,
+    );
+    const orderBy = orderByFrom(ordering, AUDIT_SORT_COLUMNS) ?? {
+      timestamp: 'desc' as const,
+    };
     const [rows, total] = await Promise.all([
       prisma.audit_Log.findMany({
         where: normalized.where,
-        orderBy: { timestamp: 'desc' },
-        skip: (normalized.page - 1) * normalized.pageSize,
-        take: normalized.pageSize,
+        orderBy: orderBy as never,
+        skip: ordering.skip,
+        take: ordering.take,
         include: { actor: { select: { name: true } } },
       }),
       prisma.audit_Log.count({ where: normalized.where }),
@@ -65,6 +94,7 @@ export class AuditService {
       total,
       page: normalized.page,
       pageSize: normalized.pageSize,
+      pageInfo: buildPageInfo(ordering, total),
     };
   }
 }

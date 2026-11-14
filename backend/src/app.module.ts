@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
 import { GraphQLModule } from '@nestjs/graphql';
+import { AdminModule } from './admin/admin.module.js';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { ArchiveModule } from './archive/archive.module.js';
@@ -16,6 +17,8 @@ import { ProposalVersionsModule } from './proposal_versions/proposal-versions.mo
 import { ProjectsModule } from './projects/projects.module.js';
 import { MilestonesModule } from './milestones/milestones.module.js';
 import { ReportingModule } from './reporting/reporting.module.js';
+import { SearchModule } from './search/search.module.js';
+import { TeamsModule } from './teams/teams.module.js';
 @Module({
   imports: [
     GraphQLModule.forRoot<ApolloDriverConfig>({
@@ -45,8 +48,11 @@ import { ReportingModule } from './reporting/reporting.module.js';
     NotificationsModule,
     HealthModule,
     AuditModule,
+    AdminModule,
     ProductsModule,
     ProposalVersionsModule,
+    SearchModule,
+    TeamsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

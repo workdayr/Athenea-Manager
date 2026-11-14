@@ -6,6 +6,8 @@ import {
   SessionGuard,
   type AuthenticatedUser,
 } from '../projects/session.guard.js';
+import { PageInfoGql } from '../common/pagination/pagination.model.js';
+import { buildPageInfo, toPageInfoGql } from '../common/pagination/pagination.policy.js';
 import {
   NotificationGql,
   NotificationPageGql,
@@ -62,6 +64,13 @@ export class NotificationsResolver {
     gql.total = result.total;
     gql.page = result.page;
     gql.pageSize = result.pageSize;
+    gql.pageInfo = toPageInfoGql(
+      buildPageInfo(
+        { page: result.page, pageSize: result.pageSize },
+        result.total,
+      ),
+      new PageInfoGql(),
+    );
     gql.unreadCount = result.unreadCount;
     return gql;
   }

@@ -1,5 +1,11 @@
 import { prisma } from '../db/prisma.js';
 import type { AuthenticatedUser } from '../projects/session.guard.js';
+import {
+  normalizePageArgs,
+  orderByFrom,
+  PAGINATION_MAX_PAGE_SIZE,
+  type PageArgs,
+} from '../common/pagination/pagination.policy.js';
 import { CALL_ERROR_CODES } from './calls.constants.js';
 import {
   CallError,
@@ -32,7 +38,10 @@ export interface CreateCallData {
  * US 2.2: el admin crea la convocatoria en DRAFT (aun no recibe nada).
  * La publicacion efectiva es `publishCall`.
  */
-export async function createCall(user: AuthenticatedUser, data: CreateCallData) {
+export async function createCall(
+  user: AuthenticatedUser,
+  data: CreateCallData,
+) {
   requireAdmin(user);
   const issues = validateCreateCallInput({
     title: data.title,
@@ -66,7 +75,11 @@ export async function publishCall(user: AuthenticatedUser, callId: number) {
   });
   if (!call) {
     // throw directo (no fail()): TS 6 solo estrecha `call` tras un throw.
-    throw new CallError(CALL_ERROR_CODES.NOT_FOUND, 'La convocatoria no existe.', 404);
+    throw new CallError(
+      CALL_ERROR_CODES.NOT_FOUND,
+      'La convocatoria no existe.',
+      404,
+    );
   }
   if (call.status === 'OPEN') return call;
   if (call.status === 'CLOSED') {
@@ -98,7 +111,11 @@ export async function closeCall(user: AuthenticatedUser, callId: number) {
   });
   if (!call) {
     // throw directo (no fail()): TS 6 solo estrecha `call` tras un throw.
-    throw new CallError(CALL_ERROR_CODES.NOT_FOUND, 'La convocatoria no existe.', 404);
+    throw new CallError(
+      CALL_ERROR_CODES.NOT_FOUND,
+      'La convocatoria no existe.',
+      404,
+    );
   }
   if (call.status === 'CLOSED') return call;
   return prisma.announcement.update({
@@ -120,10 +137,57 @@ export async function closeExpiredCalls(now: Date = new Date()) {
 }
 
 /** Convocatorias abiertas con deadline futuro (lazy: excluye vencidas). */
-export function openCalls(now: Date = new Date()) {
+export function openCalls(now: Date = new Date(), paging: PageArgs = {}) {
+  // F2-03 / RF-013: paginacion y orden del lado del servidor.
+  const ordering = normalizePageArgs(
+    { ...paging, pageSize: paging.pageSize ?? PAGINATION_MAX_PAGE_SIZE },
+    ['deadline', 'title', 'applicationCount'],
+    { sortBy: 'deadline', sortDir: 'asc' },
+  );
   return prisma.announcement.findMany({
     where: { status: 'OPEN', deadline: { gt: now } },
-    orderBy: { deadline: 'asc' },
+    orderBy:
+      orderByFrom(ordering, {
+        deadline: 'deadline',
+        title: 'title',
+        applicationCount: 'application_count',
+      }) ?? { deadline: 'asc' },
+    skip: ordering.skip,
+    take: ordering.take,
+  });
+}
+
+/**
+ * F1-09 / RF-018: listado institucional completo. El frontend muestra las
+ * convocatorias vigentes y las cerradas (historial) en la misma pantalla.
+ * Los borradores solo se exponen a la administracion: una convocatoria
+ * sin publicar no debe filtrarse al resto de los roles.
+ */
+export function allCalls(
+  status?: string | null,
+  includeDrafts = false,
+  paging: PageArgs = {},
+) {
+  const ordering = normalizePageArgs(
+    { ...paging, pageSize: paging.pageSize ?? PAGINATION_MAX_PAGE_SIZE },
+    ['deadline', 'title', 'status', 'applicationCount'],
+    { sortBy: 'deadline', sortDir: 'desc' },
+  );
+  return prisma.announcement.findMany({
+    where: status
+      ? { status: status as never }
+      : includeDrafts
+        ? undefined
+        : { status: { not: 'DRAFT' as never } },
+    orderBy:
+      orderByFrom(ordering, {
+        deadline: 'deadline',
+        title: 'title',
+        status: 'status',
+        applicationCount: 'application_count',
+      }) ?? { deadline: 'desc' },
+    skip: ordering.skip,
+    take: ordering.take,
   });
 }
 
@@ -159,91 +223,110 @@ export function submitProposalToCall(
   user: AuthenticatedUser,
   data: SubmitProposalData,
 ) {
-  return prisma.$transaction(async (tx) => {
-    return enrollUnderRowLock(
-      {
-        queryCallForUpdate: async (id: number) => {
-          const rows = await tx.$queryRaw<CallSnapshot[]>`
+  return prisma
+    .$transaction(async (tx) => {
+      return enrollUnderRowLock(
+        {
+          queryCallForUpdate: async (id: number) => {
+            const rows = await tx.$queryRaw<CallSnapshot[]>`
             SELECT "call_id", "status", "deadline", "application_cap", "application_count"
             FROM "Announcement"
             WHERE "call_id" = ${id}
             FOR UPDATE`;
-          return rows[0] ?? null;
+            return rows[0] ?? null;
+          },
+          markClosed: async (id: number) => {
+            await tx.announcement.update({
+              where: { call_id: id },
+              data: { status: 'CLOSED' },
+            });
+          },
+          incrementCount: async (id: number) => {
+            const updated = await tx.announcement.update({
+              where: { call_id: id },
+              data: { application_count: { increment: 1 } },
+            });
+            return updated as unknown as CallSnapshot;
+          },
         },
-        markClosed: async (id: number) => {
-          await tx.announcement.update({
-            where: { call_id: id },
-            data: { status: 'CLOSED' },
-          });
-        },
-        incrementCount: async (id: number) => {
-          const updated = await tx.announcement.update({
-            where: { call_id: id },
-            data: { application_count: { increment: 1 } },
-          });
-          return updated as unknown as CallSnapshot;
-        },
-      },
-      data.callId,
-      new Date(),
-      async () => {
-        // RF-018: un PI no puede postular dos propuestas a la misma
-        // convocatoria. La validacion corre dentro de la transaccion y tras
-        // el SELECT ... FOR UPDATE, por lo que es segura bajo concurrencia.
-        const existing = await tx.project.count({
-          where: {
-            call_id: data.callId,
-            projectUsers: {
-              some: {
-                user_id: user.id,
-                project_role: 'Principal_Investigator',
+        data.callId,
+        new Date(),
+        async () => {
+          // RF-018: un PI no puede postular dos propuestas a la misma
+          // convocatoria. La validacion corre dentro de la transaccion y tras
+          // el SELECT ... FOR UPDATE, por lo que es segura bajo concurrencia.
+          const existing = await tx.project.count({
+            where: {
+              call_id: data.callId,
+              projectUsers: {
+                some: {
+                  user_id: user.id,
+                  project_role: 'Principal_Investigator',
+                },
               },
             },
-          },
-        });
-        if (existing > 0) {
-          fail(
-            CALL_ERROR_CODES.ALREADY_APPLIED,
-            'Ya tienes una postulacion registrada en esta convocatoria.',
-            409,
-            'callId',
-          );
-        }
+          });
+          if (existing > 0) {
+            fail(
+              CALL_ERROR_CODES.ALREADY_APPLIED,
+              'Ya tienes una postulacion registrada en esta convocatoria.',
+              409,
+              'callId',
+            );
+          }
 
-        return tx.project.create({
-          data: {
-            title: data.title.trim(),
-            objectives: data.objectives.trim(),
-            start_date: data.startDate,
-            end_date: data.endDate,
-            call_id: data.callId,
-            is_confidential: data.isConfidential === true,
-            research_involves_humans: data.researchInvolvesHumans === true,
-            research_involves_animals: data.researchInvolvesAnimals === true,
-            uses_sensitive_data: data.usesSensitiveData === true,
-            // F1-02: el alta nace en Draft y pasa a Proposed al completar
-            // los 5 documentos obligatorios, igual que el alta directa.
-            status: 'Draft',
-            projectUsers: {
-              create: {
-                user_id: user.id,
-                project_role: 'Principal_Investigator',
+          return tx.project.create({
+            data: {
+              title: data.title.trim(),
+              objectives: data.objectives.trim(),
+              start_date: data.startDate,
+              end_date: data.endDate,
+              call_id: data.callId,
+              is_confidential: data.isConfidential === true,
+              research_involves_humans: data.researchInvolvesHumans === true,
+              research_involves_animals: data.researchInvolvesAnimals === true,
+              uses_sensitive_data: data.usesSensitiveData === true,
+              // F1-02: el alta nace en Draft y pasa a Proposed al completar
+              // los 5 documentos obligatorios, igual que el alta directa.
+              status: 'Draft',
+              projectUsers: {
+                create: {
+                  user_id: user.id,
+                  project_role: 'Principal_Investigator',
+                },
               },
             },
-          },
-          include: {
-            call: { select: { title: true } },
-            projectUsers: {
-              select: {
-                project_role: true,
-                user: { select: { name: true } },
+            include: {
+              call: { select: { title: true } },
+              projectUsers: {
+                select: {
+                  project_role: true,
+                  user: { select: { name: true } },
+                },
               },
+              milestones: { select: { status: true } },
+              expenses: { select: { amount: true } },
             },
-            milestones: { select: { status: true } },
-            expenses: { select: { amount: true } },
-          },
+          });
+        },
+      );
+    })
+    .catch(async (error: unknown) => {
+      // RF-018: al rechazar por cupo lleno o deadline vencido,
+      // `enrollUnderRowLock` marca la convocatoria como CLOSED dentro de la
+      // transaccion, pero el `throw` la revierte. Se cierra despues del
+      // rollback (condicionado a que siga OPEN) para no dejarla abierta sin
+      // cupo ni vigencia.
+      if (
+        error instanceof CallError &&
+        (error.code === CALL_ERROR_CODES.CALL_FULL ||
+          error.code === CALL_ERROR_CODES.CALL_CLOSED)
+      ) {
+        await prisma.announcement.updateMany({
+          where: { call_id: data.callId, status: 'OPEN' },
+          data: { status: 'CLOSED' },
         });
-      },
-    );
-  });
+      }
+      throw error;
+    });
 }

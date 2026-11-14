@@ -4,6 +4,11 @@ import { prisma } from '../db/prisma.js';
 import { Prisma } from '../generated/prisma/client.js';
 import { notifyRole } from '../notifications/notifications.service.js';
 import {
+  buildPageInfo,
+  normalizePageArgs,
+  type PageInfo,
+} from '../common/pagination/pagination.policy.js';
+import {
   ARCHIVE_ALERT_MESSAGE_MAX_LENGTH,
   ARCHIVE_BATCH_SIZE,
   ARCHIVE_TRANSACTION_TIMEOUT_MS,
@@ -34,6 +39,22 @@ export interface ArchiveBatchResult {
   archived: number;
   skipped: number;
   failed: number;
+}
+
+export interface ArchivedProjectRow {
+  project_id: number;
+  title: string;
+  status: string;
+  archived_at: Date;
+  snapshot_hash: string;
+}
+
+export interface ArchivedProjectPage {
+  items: ArchivedProjectRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  pageInfo: PageInfo;
 }
 
 export interface ArchiveAlertRow {
@@ -268,6 +289,38 @@ export class ProjectArchiveService {
       await this.raiseAlert(projectId, error);
       return { status: 'failed', projectId, error: message };
     }
+  }
+
+  /** RF-020: expedientes archivados con su hash y fecha de congelamiento. */
+  async listArchived(page = 1, pageSize = 20): Promise<ArchivedProjectPage> {
+    const ordering = normalizePageArgs({ page, pageSize }, [], {
+      sortDir: 'desc',
+    });
+    const [rows, total] = await Promise.all([
+      prisma.project_Archive.findMany({
+        orderBy: { archived_at: 'desc' },
+        skip: ordering.skip,
+        take: ordering.take,
+        include: {
+          project: { select: { project_id: true, title: true, status: true } },
+        },
+      }),
+      prisma.project_Archive.count(),
+    ]);
+
+    return {
+      items: rows.map((row) => ({
+        project_id: row.project.project_id,
+        title: row.project.title,
+        status: row.project.status,
+        archived_at: row.archived_at,
+        snapshot_hash: row.snapshot_hash,
+      })),
+      total,
+      page: ordering.page,
+      pageSize: ordering.pageSize,
+      pageInfo: buildPageInfo(ordering, total),
+    };
   }
 
   /** Alertas de archivado; por defecto solo las no resueltas. */

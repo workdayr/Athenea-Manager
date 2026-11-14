@@ -11,8 +11,11 @@ import {
 import {
   blockReasonMessage,
   DECISION_LABELS,
+  downloadDecisionReport,
+  fetchDecisionReportStatus,
   PROPOSAL_EVALUATION_CONTEXT_QUERY,
   SUBMIT_PROJECT_DECISION_MUTATION,
+  type DecisionReport,
   type ProposalContext,
 } from '@/lib/proposal-evaluation';
 
@@ -134,6 +137,12 @@ export default function ProposalEvaluationDetailPage() {
         toast.error(
           'No puedes evaluar un proyecto de tu propio equipo (BR-004).',
         );
+      } else if (code === 'DEPARTMENT_CONFLICT') {
+        toast.error(
+          'No puedes evaluar un proyecto del mismo departamento que el Investigador Principal (BR-004).',
+          'Evaluación bloqueada',
+        );
+        await loadContext();
       } else if (code === 'INVALID_STATE') {
         toast.error(
           'El proyecto ya no admite decisión en su estado actual.',
@@ -258,6 +267,10 @@ export default function ProposalEvaluationDetailPage() {
                       <p className="mt-1 text-sm text-gray-700">
                         {item.justification}
                       </p>
+                      {/* F1-10 / RF-019: dictamen PDF asincrono. */}
+                      <DecisionReportPanel
+                        evaluationId={Number(item.evaluationId)}
+                      />
                     </li>
                   ))}
                 </ul>
@@ -329,5 +342,94 @@ export default function ProposalEvaluationDetailPage() {
         )}
       </div>
     </main>
+  );
+}
+
+/**
+ * F1-10 / RF-019: estado del dictamen PDF de una decision. Consulta al
+ * servidor y reintenta cada 3 s mientras el worker lo genera; no bloquea
+ * la evaluacion ni el resto de la pantalla.
+ */
+function DecisionReportPanel({ evaluationId }: { evaluationId: number }) {
+  const toast = useToast();
+  const [report, setReport] = useState<DecisionReport | null>(null);
+  const [downloading, setDownloading] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    async function poll() {
+      try {
+        const status = await fetchDecisionReportStatus(evaluationId);
+        if (!active) {
+          return;
+        }
+        setReport(status);
+        if (status.status === 'Pending') {
+          timer = setTimeout(() => void poll(), 3_000);
+        }
+      } catch {
+        if (active) {
+          setReport(null);
+        }
+      }
+    }
+
+    void poll();
+    return () => {
+      active = false;
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
+  }, [evaluationId]);
+
+  async function handleDownload() {
+    setDownloading(true);
+    try {
+      await downloadDecisionReport(evaluationId);
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'No fue posible descargar el dictamen.',
+        'Descarga no disponible',
+      );
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  if (!report) {
+    return null;
+  }
+
+  if (report.status === 'Pending') {
+    return (
+      <p className="mt-2 text-xs text-gray-500">
+        Generando dictamen en PDF…
+      </p>
+    );
+  }
+
+  if (report.status === 'Failed') {
+    return (
+      <p className="mt-2 text-xs text-red-700">
+        No se pudo generar el dictamen PDF. El equipo de soporte revisará el
+        error.
+      </p>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void handleDownload()}
+      disabled={downloading}
+      className="mt-2 text-xs font-medium text-blue-700 hover:underline disabled:opacity-50"
+    >
+      {downloading ? 'Descargando…' : 'Descargar dictamen PDF'}
+    </button>
   );
 }

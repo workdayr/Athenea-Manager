@@ -6,10 +6,14 @@ import { Roles } from '../auth/roles.decorator.js';
 import { RolesGuard } from '../auth/roles.guard.js';
 import { SessionGuard } from '../projects/session.guard.js';
 import { ARCHIVE_ERROR_CODES } from './archive.constants.js';
+import { PageInfoGql } from '../common/pagination/pagination.model.js';
+import { toPageInfoGql } from '../common/pagination/pagination.policy.js';
 import {
   ArchiveAlertGql,
   ArchiveBatchResultGql,
   ArchiveOutcomeGql,
+  ArchivedProjectGql,
+  ArchivedProjectPageGql,
 } from './archive.model.js';
 import {
   ProjectArchiveService,
@@ -50,6 +54,32 @@ function toOutcomeGql(outcome: ArchiveOutcome): ArchiveOutcomeGql {
 @UseGuards(SessionGuard, RolesGuard)
 export class ArchiveResolver {
   constructor(private readonly archiveService: ProjectArchiveService) {}
+
+  @Query(() => ArchivedProjectPageGql)
+  @Roles(ROLES.ADMINISTRATOR)
+  async archivedProjects(
+    @Args('page', { type: () => Int, nullable: true, defaultValue: 1 })
+    page = 1,
+    @Args('pageSize', { type: () => Int, nullable: true, defaultValue: 20 })
+    pageSize = 20,
+  ): Promise<ArchivedProjectPageGql> {
+    const result = await this.archiveService.listArchived(page, pageSize);
+    const gql = new ArchivedProjectPageGql();
+    gql.items = result.items.map((row) => {
+      const item = new ArchivedProjectGql();
+      item.projectId = row.project_id;
+      item.title = row.title;
+      item.status = row.status;
+      item.archivedAt = row.archived_at;
+      item.snapshotHash = row.snapshot_hash;
+      return item;
+    });
+    gql.total = result.total;
+    gql.page = result.page;
+    gql.pageSize = result.pageSize;
+    gql.pageInfo = toPageInfoGql(result.pageInfo, new PageInfoGql());
+    return gql;
+  }
 
   @Query(() => [ArchiveAlertGql])
   @Roles(ROLES.ADMINISTRATOR)

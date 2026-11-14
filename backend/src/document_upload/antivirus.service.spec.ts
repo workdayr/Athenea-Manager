@@ -6,19 +6,21 @@ import { AntivirusService } from './antivirus.service.js';
  * Crea un socket fake que simula clamd. Emite 'connect' inmediatamente y,
  * tras un retraso configurable, emite 'data' con la respuesta dada.
  */
+type FakeClamdSocket = {
+  write: ReturnType<typeof vi.fn>;
+  destroy: ReturnType<typeof vi.fn>;
+  setTimeout: ReturnType<typeof vi.fn>;
+  once: ReturnType<typeof vi.fn>;
+  on: ReturnType<typeof vi.fn>;
+  emit: (...args: any[]) => boolean;
+};
+
 function fakeClamdSocket(
   response: string,
   delayMs = 10,
   splitResponse = false,
-): Socket & { write: ReturnType<typeof vi.fn> } {
-  const socket = new Socket() as Socket & {
-    write: ReturnType<typeof vi.fn>;
-    destroy: ReturnType<typeof vi.fn>;
-    setTimeout: ReturnType<typeof vi.fn>;
-    once: ReturnType<typeof vi.fn>;
-    on: ReturnType<typeof vi.fn>;
-    emit: (...args: any[]) => boolean;
-  };
+): FakeClamdSocket {
+  const socket = new Socket() as unknown as FakeClamdSocket;
   socket.write = vi.fn();
   socket.destroy = vi.fn();
   socket.setTimeout = vi.fn();
@@ -58,9 +60,9 @@ function fakeClamdSocket(
     }
   }, delayMs);
   (socket as any).triggerError = () => {
-    const listeners = (socket.once as any).mock.calls
-      .filter(([e]) => e === 'error')
-      .map(([, cb]) => cb);
+    const listeners = socket.once.mock.calls
+      .filter((call: unknown[]) => call[0] === 'error')
+      .map((call: unknown[]) => call[1] as (error: Error) => void);
     for (const cb of listeners) cb(new Error('ECONNREFUSED'));
   };
   return socket;
@@ -194,17 +196,16 @@ describe('AntivirusService (clamd INSTREAM)', () => {
   });
 
   it('devuelve unavailable si la conexion es rechazada', async () => {
-    const socket = new Socket() as Socket & {
-      once: ReturnType<typeof vi.fn>;
-      on: ReturnType<typeof vi.fn>;
-    };
-    socket.once = vi.fn((event: string, listener: (...args: any[]) => void) => {
-      if (event === 'error') {
-        setTimeout(() => listener(new Error('ECONNREFUSED')), 10);
-      }
-      return socket;
-    });
-    socket.on = vi.fn();
+    const socket = new Socket();
+    socket.once = vi.fn(
+      (event: string, listener: (...args: any[]) => void) => {
+        if (event === 'error') {
+          setTimeout(() => listener(new Error('ECONNREFUSED')), 10);
+        }
+        return socket;
+      },
+    ) as unknown as Socket['once'];
+    socket.on = vi.fn() as unknown as Socket['on'];
     const createConnection = vi.fn().mockReturnValue(socket);
     const av = new AntivirusService({ createConnection, timeoutMs: 5000 });
     const result = await av.scan(Buffer.from('cualquier cosa'));

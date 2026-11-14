@@ -24,6 +24,17 @@ export enum ConflictStatusGql {
 
 registerEnumType(ConflictStatusGql, { name: 'ConflictStatus' });
 
+/** F1-10 / RF-019: estado de generacion del dictamen PDF. */
+export enum DecisionReportStatusGql {
+  Pending = 'Pending',
+  Ready = 'Ready',
+  Failed = 'Failed',
+}
+
+registerEnumType(DecisionReportStatusGql, {
+  name: 'DecisionReportStatus',
+});
+
 @ObjectType()
 export class TeamMemberGql {
   @Field(() => ID)
@@ -154,6 +165,28 @@ export class ProposalContextGql {
   /** Motivo de bloqueo legible por maquina (null si puede evaluar). */
   @Field(() => String, { nullable: true })
   blockReason!: string | null;
+}
+
+@ObjectType()
+export class DecisionReportGql {
+  @Field(() => ID)
+  reportId!: number;
+
+  @Field(() => Int)
+  evaluationId!: number;
+
+  @Field(() => DecisionReportStatusGql)
+  status!: DecisionReportStatusGql;
+
+  @Field(() => GraphQLISODateTime, { nullable: true })
+  readyAt!: Date | null;
+
+  /** Motivo del fallo (solo visible mientras el dictamen no esta listo). */
+  @Field(() => String, { nullable: true })
+  error!: string | null;
+
+  @Field(() => Int)
+  attempts!: number;
 }
 
 @ObjectType()

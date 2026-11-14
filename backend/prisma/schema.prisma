@@ -42,6 +42,10 @@ model User {
   // Internos: no se exponen en respuestas (returned: false).
   failedAttempts Int       @default(0)
   lockedUntil    DateTime?
+  // F1-10 / BR-004: departamento academico del evaluador. Se compara con
+  // el departamento del PI para bloquear evaluaciones del mismo departamento.
+  // D-02 sigue abierta sobre el origen oficial del dato.
+  department     String?   @db.VarChar(120)
   sessions       Session[]
   accounts       Account[]
   projectUsers   Project_User[]
@@ -54,6 +58,9 @@ model User {
   resolvedConflicts Review_Conflict[]     @relation("ConflictResolver")
   // NUEVO: Relación con las tareas asignadas (US 5.2)
   assignedMilestones Milestone[]
+  // RF-011 / BR-010: invitaciones recibidas y creadas por el usuario.
+  teamInvitations   Team_Invitation[] @relation("InvitationUser")
+  createdInvitations Team_Invitation[] @relation("InvitationCreator")
   // RF-014: notificaciones in-app y correos encolados del usuario.
   notifications      Notification[]
   // F1-02 / F1-11: historial de estados, certificacion de anonimizacion y
@@ -279,6 +286,8 @@ model Project {
   statusTransitions Project_Status_Transition[]
   // F1-03: versiones e historial de propuestas (RF-004).
   proposalVersions  Proposal_Version[]
+  // F2-02 / RF-011: invitaciones de equipo pendientes o historicas.
+  teamInvitations   Team_Invitation[]
   // F1-11: usuario que certifico la anonimizacion.
   anonymizationCertifier User? @relation("AnonymizationCertifier", fields: [anonymization_certified_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
 
@@ -373,6 +382,11 @@ model Milestone {
   assignee_id     String
   due_date        DateTime        @db.Date
   status          MilestoneStatus @default(Pending)
+  // F2-07 / BR-008: ultima actualizacion de avance y ultimo aviso de
+  // vencimiento enviado (30/15/5 dias). El job diario los usa para
+  // detectar tareas sin movimiento y no duplicar correos.
+  last_progress_at DateTime        @default(now()) @db.Timestamp()
+  due_notice_days  Int             @default(0)
 
   project         Project         @relation(fields: [project_id], references: [project_id])
   // NUEVO: Relación con el usuario de BetterAuth
@@ -383,6 +397,7 @@ model Milestone {
   // RF-006 / RF-008: hitos por proyecto y deteccion de retrasos.
   @@index([project_id, status, due_date])
   @@index([assignee_id])
+  @@index([status, last_progress_at])
 }
 
 model Product {
@@ -502,6 +517,34 @@ model Proposal_Evaluation {
   @@index([project_id])
   @@index([reviewer_id])
   @@index([created_at])
+  // F1-10 / RF-019: dictamen PDF generado de forma asincrona.
+  report Decision_Report?
+}
+
+/**
+ * F1-10 / RF-019: estado de generacion del dictamen en PDF. La decision se
+ * guarda de inmediato; el PDF se produce despues con un worker in-process.
+ */
+enum DecisionReportStatus {
+  Pending
+  Ready
+  Failed
+}
+
+model Decision_Report {
+  report_id     Int                  @id @default(autoincrement())
+  evaluation_id Int                  @unique
+  status        DecisionReportStatus @default(Pending)
+  file_path     String?              @db.Text
+  error         String?              @db.Text
+  attempts      Int                  @default(0)
+  created_at    DateTime             @default(now()) @db.Timestamp()
+  ready_at      DateTime?            @db.Timestamp()
+
+  evaluation Proposal_Evaluation @relation(fields: [evaluation_id], references: [evaluation_id], onDelete: Cascade)
+
+  @@index([status, created_at])
+  @@map("Decision_Report")
 }
 
 model Review_Conflict {
@@ -556,6 +599,47 @@ model Archive_Alert {
 
   @@index([project_id, attempted_at])
   @@index([resolved_at])
+}
+
+// ==========================================
+// EQUIPOS E INVITACIONES (RF-011 / BR-010)
+// ==========================================
+
+enum InvitationStatus {
+  Pending
+  Accepted
+  Revoked
+  Expired
+}
+
+/**
+ * F2-02 / RF-011: invitacion de un miembro al equipo de un proyecto.
+ * BR-010 exige la declaracion de ausencia de conflicto familiar antes de
+ * enviar la invitacion; el token caduca a los 7 dias.
+ */
+model Team_Invitation {
+  invitation_id       Int              @id @default(autoincrement())
+  project_id          Int
+  email               String           @db.VarChar(320)
+  // Usuario ya registrado con ese correo, si existe.
+  user_id             String?
+  project_role        ProjectRole
+  token               String           @unique @db.VarChar(64)
+  status              InvitationStatus @default(Pending)
+  expires_at          DateTime         @db.Timestamp()
+  created_by          String
+  // BR-010: fecha de la declaracion de ausencia de conflicto familiar.
+  affidavit_signed_at DateTime         @db.Timestamp()
+  accepted_at         DateTime?        @db.Timestamp()
+  created_at          DateTime         @default(now()) @db.Timestamp()
+
+  project             Project          @relation(fields: [project_id], references: [project_id], onDelete: Cascade, onUpdate: Cascade)
+  user                User?            @relation("InvitationUser", fields: [user_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  creator             User             @relation("InvitationCreator", fields: [created_by], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([project_id, status])
+  @@index([email, status])
+  @@index([expires_at, status])
 }
 
 // ==========================================

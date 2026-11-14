@@ -3,6 +3,12 @@ import type { ProductType } from '../generated/prisma/client.js';
 import { assertProjectWritable } from '../projects/project-write-guard.js';
 import type { AuthenticatedUser } from '../projects/session.guard.js';
 import {
+  normalizePageArgs,
+  orderByFrom,
+  PAGINATION_MAX_PAGE_SIZE,
+  type PageArgs,
+} from '../common/pagination/pagination.policy.js';
+import {
   PRODUCT_ERROR_CODES,
   productRegisterAuditAction,
 } from './products.constants.js';
@@ -170,7 +176,14 @@ export async function registerResearchOutput(
 
 export async function getProjectProducts(
   projectId: number,
+  paging: PageArgs = {},
 ): Promise<ProductView[]> {
+  // F2-03 / RF-013: paginacion y orden del lado del servidor.
+  const ordering = normalizePageArgs(
+    { ...paging, pageSize: paging.pageSize ?? PAGINATION_MAX_PAGE_SIZE },
+    ['createdAt', 'productType', 'title'],
+    { sortBy: 'createdAt', sortDir: 'desc' },
+  );
   const rows = await prisma.product.findMany({
     where: { project_id: projectId },
     include: {
@@ -179,7 +192,14 @@ export async function getProjectProducts(
         orderBy: { author_order: 'asc' },
       },
     },
-    orderBy: { created_at: 'desc' },
+    orderBy:
+      orderByFrom(ordering, {
+        createdAt: 'created_at',
+        productType: 'product_type',
+        title: 'title',
+      }) ?? { created_at: 'desc' },
+    skip: ordering.skip,
+    take: ordering.take,
   });
 
   return rows.map((row) => ({

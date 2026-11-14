@@ -19,6 +19,12 @@ import {
   validateRegisterProjectInput,
 } from './projects.policy.js';
 import { assertProjectWritable } from './project-write-guard.js';
+import {
+  normalizePageArgs,
+  orderByFrom,
+  PAGINATION_MAX_PAGE_SIZE,
+  type PageArgs,
+} from '../common/pagination/pagination.policy.js';
 import type { AuthenticatedUser } from './session.guard.js';
 
 /** Error de dominio: se mapea a GraphQL (extensions.code) o a HTTP. */
@@ -154,10 +160,27 @@ export async function registerProject(
 }
 
 /** Proyectos donde el usuario es miembro (para "Mis proyectos" y el cupo). */
-export function myProjects(user: AuthenticatedUser) {
+export function myProjects(
+  user: AuthenticatedUser,
+  paging: PageArgs = {},
+) {
+  // F2-03 / RF-013: paginacion y ordenamiento del lado del servidor.
+  const ordering = normalizePageArgs(
+    { ...paging, pageSize: paging.pageSize ?? PAGINATION_MAX_PAGE_SIZE },
+    ['projectId', 'title', 'status', 'startDate'],
+    { sortBy: 'projectId', sortDir: 'desc' },
+  );
   return prisma.project.findMany({
     where: { projectUsers: { some: { user_id: user.id } } },
-    orderBy: { project_id: 'desc' },
+    orderBy:
+      orderByFrom(ordering, {
+        projectId: 'project_id',
+        title: 'title',
+        status: 'status',
+        startDate: 'start_date',
+      }) ?? { project_id: 'desc' },
+    skip: ordering.skip,
+    take: ordering.take,
     include: {
       call: { select: { title: true } },
       projectUsers: {

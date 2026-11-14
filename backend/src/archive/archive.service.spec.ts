@@ -20,6 +20,10 @@ const { prismaMock, txMock } = vi.hoisted(() => {
       create: vi.fn(),
       findMany: vi.fn(),
     },
+    project_Archive: {
+      findMany: vi.fn(),
+      count: vi.fn(),
+    },
     user: {
       findMany: vi.fn(),
     },
@@ -77,6 +81,8 @@ beforeEach(() => {
 
   prismaMock.project.findMany.mockResolvedValue([{ project_id: 5 }]);
   prismaMock.archive_Alert.create.mockResolvedValue({ alert_id: 1 });
+  prismaMock.project_Archive.findMany.mockResolvedValue([]);
+  prismaMock.project_Archive.count.mockResolvedValue(0);
   prismaMock.user.findMany.mockResolvedValue([
     { id: 'admin-1', email: 'admin@unipolidgo.edu.mx' },
   ]);
@@ -250,6 +256,36 @@ describe('ProjectArchiveService (RF-020)', () => {
       select: { project_id: true },
       orderBy: { project_id: 'asc' },
       take: expect.any(Number),
+    });
+  });
+
+  it('lista los expedientes archivados con paginacion', async () => {
+    prismaMock.project_Archive.findMany.mockResolvedValue([
+      {
+        project_id: 5,
+        archived_at: new Date('2026-11-01T00:00:00.000Z'),
+        snapshot_hash: 'a'.repeat(64),
+        project: { project_id: 5, title: 'Cerrado', status: 'Closed' },
+      },
+    ]);
+    prismaMock.project_Archive.count.mockResolvedValue(1);
+
+    const page = await service().listArchived(1, 20);
+
+    expect(page.total).toBe(1);
+    expect(page.items[0]).toMatchObject({
+      project_id: 5,
+      title: 'Cerrado',
+      status: 'Closed',
+      snapshot_hash: 'a'.repeat(64),
+    });
+    expect(prismaMock.project_Archive.findMany).toHaveBeenCalledWith({
+      orderBy: { archived_at: 'desc' },
+      skip: 0,
+      take: 20,
+      include: {
+        project: { select: { project_id: true, title: true, status: true } },
+      },
     });
   });
 

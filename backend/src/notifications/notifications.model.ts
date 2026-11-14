@@ -6,6 +6,7 @@ import {
   ObjectType,
   registerEnumType,
 } from '@nestjs/graphql';
+import { PageInfoGql } from '../common/pagination/pagination.model.js';
 
 /** RF-014: tipos de evento notificables. */
 export enum NotificationTypeGql {
@@ -58,6 +59,10 @@ export class NotificationPageGql {
 
   @Field(() => Int)
   pageSize!: number;
+
+  /** F2-03 / RF-013: metadatos de paginacion reutilizables. */
+  @Field(() => PageInfoGql)
+  pageInfo!: PageInfoGql;
 
   @Field(() => Int)
   unreadCount!: number;

@@ -6,6 +6,7 @@ import {
   Int,
   ObjectType,
 } from '@nestjs/graphql';
+import { PageInfoGql } from '../common/pagination/pagination.model.js';
 
 @InputType()
 export class AuditLogFiltersInput {
@@ -62,4 +63,8 @@ export class AuditLogPageGql {
 
   @Field(() => Int)
   pageSize!: number;
+
+  /** F2-03 / RF-013: metadatos de paginacion reutilizables. */
+  @Field(() => PageInfoGql)
+  pageInfo!: PageInfoGql;
 }

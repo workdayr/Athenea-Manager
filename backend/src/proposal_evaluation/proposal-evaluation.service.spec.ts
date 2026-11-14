@@ -130,9 +130,17 @@ const { state, prismaMock } = vi.hoisted(() => {
         return args.data;
       },
     },
+    // F1-10: el dictamen pendiente entra en la misma transaccion.
+    decision_Report: {
+      create: async () => ({ report_id: state.nextEvaluationId }),
+    },
   };
 
   const prismaMock = {
+    // F1-10 / BR-004: sin departamento declarado no hay conflicto.
+    user: {
+      findUnique: async () => ({ department: null }),
+    },
     project: {
       findMany: async () =>
         state.projects.map((p) => ({

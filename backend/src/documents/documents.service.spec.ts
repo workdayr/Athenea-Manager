@@ -40,7 +40,7 @@ const projectRow = {
   project_id: 10,
   title: 'Proyecto de prueba',
   status: 'Active',
-} as unknown;
+};
 
 const evidenceDocument = {
   document_id: 55,
@@ -217,6 +217,8 @@ describe('listProjectDocuments (US 4.1 / RF-005)', () => {
     expect(prisma.projectDocument.findMany).toHaveBeenCalledWith({
       where: { project_id: 10 },
       orderBy: { uploaded_at: 'desc' },
+      skip: 0,
+      take: 50,
       include: { reviewer: { select: { name: true } } },
     });
     expect(result[0]?.can_change_visibility).toBe(false); // obligatorio
@@ -234,6 +236,8 @@ describe('listProjectDocuments (US 4.1 / RF-005)', () => {
     expect(prisma.projectDocument.findMany).toHaveBeenCalledWith({
       where: { project_id: 10, visibility: 'Shared_with_administration' },
       orderBy: { uploaded_at: 'desc' },
+      skip: 0,
+      take: 50,
       include: { reviewer: { select: { name: true } } },
     });
     expect(result[0]?.can_change_visibility).toBe(false);

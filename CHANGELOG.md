@@ -82,16 +82,16 @@ documentos y paneles por rol.
 | --- | --- | --- |
 | RF-001 Control de acceso por rol | Implementado | `auth/roles.guard.ts`, `@Roles()`, `/access-denied` |
 | RF-002 Registro de proyectos | Implementado | `projects/` + `POST /projects/:id/documents` |
-| RF-003 Ciclo de vida / aprobación | Parcial | `Draft → Proposed → Under_Review → Approved/Rejected`; faltan `Active`, `Completed`, `Closed`, `Suspended` y notificaciones reales |
-| RF-004 Versiones e historial de propuestas | **No implementado** | — |
+| RF-003 Ciclo de vida / aprobación | Implementado | `projects/project-lifecycle.*`; matriz de transiciones, historial y SLA |
+| RF-004 Versiones e historial de propuestas | Implementado | `proposal_versions/` + UI del expediente |
 | RF-005 Visibilidad documental | Implementado | `documents/` + UI de documentos |
-| RF-006 Hitos y actividades | Parcial (US 5.2) | `milestones/` + panel del proyecto; sin CRUD de hitos ni validación de pertenencia |
-| RF-007 Registro de productos de investigación | **No implementado** | — |
-| RF-008 Dashboard y reportes | Parcial | `dashboard/`; hitos reales desde `0.9.0`, el resto con datos demo |
-| RF-009 Asistente IA (RAG) | **No implementado** | Esquema listo con `pgvector` |
+| RF-006 Hitos y actividades | Implementado | `milestones/` con CRUD, asignación, avance y job BR-008 |
+| RF-007 Registro de productos de investigación | Implementado | `products/` + UI del expediente |
+| RF-008 Dashboard y reportes | Implementado | `reporting/`, exportación CSV/PDF y dashboards por rol |
+| RF-009 Asistente IA (RAG) | **Fuera de esta entrega** | Lo implementa otro equipo; el esquema `pgvector` ya existe |
 | RF-010 Bloqueo de cuenta | Implementado | `auth.policy.ts`, `auth.ts` |
 | RF-016 Carga segura / antivirus / cuotas | Implementado | `document_upload/`, `projects.service.ts` |
-| RF-017 Auditoría | Parcial | `Audit_Log` en subidas, decisiones, conflictos y visibilidad |
+| RF-017 Auditoría | Implementado | `audit/`, `/admin/audit` y registro en los servicios de dominio |
 | RF-018 Convocatorias | Implementado (backend) | `calls/` |
 | RF-019 Justificación de decisiones | Implementado | `proposal_evaluation/` |
 | RNF-005 Cuota de almacenamiento | Implementado | 25 MB/archivo, 500 MB/proyecto |
@@ -101,8 +101,8 @@ documentos y paneles por rol.
 ## 2. No publicado
 
 Cambios posteriores a `0.9.0` (Fase 0 de saneamiento, 2026-11-12; Sprint 1
-de cierre de brechas, 2026-11-13; Sprint 2, 2026-11-14) y deudas conocidas
-detectadas al documentar el estado actual.
+de cierre de brechas, 2026-11-13; Sprints 2 a 5, 2026-11-14/15) y deudas
+conocidas detectadas al documentar el estado actual.
 
 ### Añadido — Sprint 1 (2026-11-13)
 
@@ -203,12 +203,148 @@ detectadas al documentar el estado actual.
   las tablas `Proposal_Version` y `Product_Author`, y añade las columnas y
   claves foráneas requeridas.
 
+### Añadido — Sprint 4 (2026-11-14)
+
+- **Verificación de correo y recuperación de contraseña (F1-06 / RF-010).**
+  BetterAuth envía el enlace de verificación al registrarse
+  (`emailVerification.sendOnSignUp`) y el de recuperación con vigencia de 30
+  minutos (`resetPasswordTokenExpiresIn`), revocando las sesiones abiertas al
+  cambiar la contraseña. Ambos correos reutilizan `EmailService` con
+  plantillas en español y modo fail-soft: sin SMTP el enlace se registra en el
+  log. `EMAIL_VERIFICATION_REQUIRED` controla si se exige el correo verificado
+  para iniciar sesión (por defecto solo en producción). El frontend incorpora
+  `/verify-email` (confirmación y reenvío), `/forgot-password` y
+  `/reset-password`, con enlaces desde el login.
+- **Administración de usuarios y roles (F1-07 / RF-001, BR-005).**
+  Módulo `admin` con la query `users(filters, page, pageSize)` (búsqueda por
+  nombre/correo, filtro por rol, verificación y bloqueo) y la mutación
+  `updateUserRole(userId, role)`. Todo cambio exige `ADMINISTRATOR`, registra
+  `ROLE_CHANGE` en la bitácora y notifica al usuario afectado. Se protege al
+  último administrador (`LAST_ADMINISTRATOR`) y el rol nunca se acepta desde
+  el cliente. Nueva pantalla `/admin/users` con tabla paginada, filtros y
+  confirmación de cambio, enlazada desde la navegación.
+- **UI de convocatorias (F1-09 / RF-018).** Query `calls(status)` para el
+  historial completo (abiertas y cerradas) además de `openCalls`. Pantallas
+  `/calls`, `/calls/[callId]` y `/admin/calls`: listado con cupos restantes,
+  detalle con postulación (solo PI) y gestión administrativa
+  (crear borrador, publicar, cerrar). La postulación reutiliza
+  `/projects/new?callId=N` y el flujo de 5 PDFs; los errores `CALL_FULL`,
+  `CALL_CLOSED` y `ALREADY_APPLIED` se muestran de forma explícita. El módulo
+  “Convocatorias” de la navegación queda activo.
+- **Pruebas de integración contra PostgreSQL (F1-09 / F1-07).** Nuevas
+  suites `calls.integration.spec.ts` y `admin.integration.spec.ts` con datos
+  únicos por ejecución y limpieza en `afterAll`: alta en `Draft` y consumo de
+  cupo, postulación duplicada (`ALREADY_APPLIED`), convocatoria cerrada
+  (`CALL_CLOSED`), cupo lleno (`CALL_FULL`) y cierre al completar el cupo;
+  además del cambio de rol con auditoría `ROLE_CHANGE`, notificación y correo
+  encolado, idempotencia, rol inválido, usuario inexistente y actor sin
+  permisos. Se omiten automáticamente si no hay base disponible
+  (`npm run test:integration` para ejecutarlas aparte).
+- **Corregido: cierre por cupo revertido por el error.** Al rechazar por
+  `CALL_FULL` o deadline vencido, `markClosed` se ejecutaba dentro de la
+  transacción que el `throw` revertía, dejando la convocatoria `OPEN` sin
+  cupo ni vigencia. Ahora se cierra después del rollback, condicionado a que
+  siga `OPEN`.
+- **Sin migración nueva.** Las tablas requeridas (`user`, `verification`,
+  `session`, `Audit_Log`, `Notification`) ya existen desde versiones previas.
+
+### Añadido — Sprint 5 (2026-11-15)
+
+- **Dictamen en PDF asíncrono y conflicto departamental (F1-10 / RF-019,
+  BR-004).** `submitProjectDecision` sigue guardando la decisión sin bloquear
+  y crea un `Decision_Report` en `Pending`; un `DecisionReportScheduler`
+  in-process toma los pendientes, genera el PDF con `pdfkit` en `UPLOAD_DIR`
+  y reintenta hasta `DECISION_REPORT_MAX_ATTEMPTS`. La query
+  `decisionReportStatus(evaluationId)` y la descarga
+  `GET /decisions/:evaluationId/report` solo están disponibles para el equipo
+  del proyecto y roles institucionales. Un dictamen `Pending`/`Failed` se
+  reintenta de forma controlada. BR-004 se amplía: si el revisor y el PI
+  comparten departamento (`User.department`), `proposalContext` expone
+  `canEvaluate = false` con código `DEPARTMENT_CONFLICT`.
+- **Paginación, filtros y ordenamiento en servidor (F2-03).** Tipos
+  compartidos `PageInput`/`PageInfoGql`/`SortDirectionGql` con máximo de 50
+  elementos por página (default 50 para no alterar listados existentes).
+  `admin.users`, `auditLog`, `myNotifications`, `myProjects`,
+  `projectDocuments`, `projectMilestones`, `projectProducts` y `calls`
+  aceptan `page`, `pageSize`, `sortBy` y `sortDir`, y devuelven `pageInfo`
+  donde el contrato lo permite. Las listas de proyecto y convocatorias
+  conservan su forma de arreglo para no romper el frontend.
+- **Exportación de reportes (F2-05 / RF-008).** `ReportingService` reutiliza
+  las consultas de coordinación y estadísticas para exportar **todos** los
+  registros filtrados (iterando páginas, sin el tope de 50) en CSV y PDF
+  mediante `GET /reports/coordinator/export` y
+  `GET /reports/statistical/export`. El presupuesto solo se incluye para
+  Coordinación y Administración. El dashboard reemplaza la generación de CSV
+  en el navegador por la descarga del servidor y añade el botón PDF.
+- **Migración `20261115000000_sprint5_decision_reports_departments`.**
+  Crea `Decision_Report` con el enum `DecisionReportStatus` y añade
+  `User.department` (idempotente).
+- **Pruebas.** Unitarias para paginación, exportación y política
+  departamental; integración de dictamen contra PostgreSQL (generación del
+  PDF, visibilidad, bloqueo por mismo departamento y evaluación permitida
+  entre departamentos distintos), con limpieza de conflictos y reportes.
+
+### Añadido — Sprint 6/7 (2026-11-16)
+
+> El asistente IA/RAG (RF-009) queda **fuera de esta entrega**: lo desarrolla
+> otro equipo y no se tocaron sus tablas ni servicios.
+
+- **Búsqueda interna (F2-01 / RF-012).** Query GraphQL `search(query, types,
+  page, pageSize)` sobre proyectos, convocatorias y usuarios con
+  `websearch_to_tsquery('spanish')` + `ILIKE` y ranking `ts_rank`. Columnas
+  generadas `search_vector` e índices GIN creados por migración; los usuarios
+  solo los busca Administración, las convocatorias en `DRAFT` solo
+  Administración y los proyectos confidenciales solo su equipo (BR-007).
+  Pantalla `/search` y Enter en el buscador del shell.
+- **Equipos e invitaciones (F2-02 / RF-011, BR-010).** Modelo
+  `Team_Invitation` con token aleatorio de 32 bytes, vigencia de 7 días y
+  estados `Pending/Accepted/Revoked/Expired`. Consultas `teamMembers` y
+  `teamInvitations`; mutaciones `inviteTeamMember`, `acceptInvitation`,
+  `revokeInvitation` y `updateTeamMemberRole`. Solo el PI del proyecto o un
+  administrador gestionan el equipo; la aceptación exige coincidencia de
+  correo y la declaración de ausencia de conflicto familiar. UI de equipo en
+  el detalle del proyecto y página `/invitations/[token]`.
+- **Detalle integral del proyecto (F2-04).** Página `/projects/[projectId]`
+  con pestañas Resumen, Equipo, Hitos, Documentos/productos e Historial, y
+  listado `/projects` enlazado desde la navegación.
+- **CRUD y seguimiento de hitos (F2-07 / RF-006, BR-008).** Mutaciones
+  `createMilestone`, `updateMilestone`, `updateMilestoneProgress`,
+  `assignMilestone` y `deleteMilestone`; solo se elimina un hito sin evidencia.
+  `MilestonesScheduler` ejecuta el barrido diario: marca `Delayed` los hitos
+  `Pending` sin avance en 7 días o vencidos y envía avisos de 30/15/5 días sin
+  duplicarlos (`last_progress_at`, `due_notice_days`). Subir evidencia cuenta
+  como avance.
+- **Auditoría y archivo (F1-08 / RF-017, RF-020).** Pantalla `/admin/audit`
+  con filtros por actor, acción, objetivo y fechas, paginación y acceso para
+  Administración/Coordinación. Query `archivedProjects` y pantalla
+  `/admin/archive` para consultar snapshots, alertas sin resolver y reintentar
+  el archivado. La navegación “Configuración y Auditoría” ya enlaza a la
+  bitácora.
+- **Respaldos (F1-08).** `docker/backup/backup.sh` y `restore.sh` respaldan
+  PostgreSQL (`pg_dump` custom) y `UPLOAD_DIR` con manifiesto SHA-256,
+  retención configurable y restauración confirmada con `--yes`. Se documenta el
+  cron y la verificación en `docker/backup/README.md`; Compose monta el volumen
+  `uploads` en `/app/uploads` para que los archivos sobrevivan a los reinicios.
+- **Migraciones** `20261116000000_search_indexes`,
+  `20261116000001_team_invitations` y `20261116000002_milestone_progress`
+  (idempotentes), **aplicadas en la base de desarrollo** el 2026-11-13.
+- **Reconciliación del historial.** Se restauraron desde Git
+  `20261014091910_integracion_diccionario_datos` y
+  `20261019010000_us5_1_tasks_milestones` (checksums idénticos a los
+  registrados). `20261029120000_us5_1_milestone_created_at` no existía en el
+  repositorio ni en Git; se reconstruyó a partir del esquema aplicado
+  (`Milestone.created_at`) y se actualizó su checksum registrado. Tras ello,
+  `prisma migrate status` queda limpio.
+- **Pruebas.** Nuevas specs de constantes de búsqueda, invitaciones, hitos
+  (BR-008, fechas UTC) y listado de archivados. Se añadieron pruebas de
+  integración contra la base migrada para búsqueda (5), invitaciones (6) e
+  hitos (10): FTS y filtros por rol, token/aceptación/revocación de
+  invitaciones, y alta, visibilidad, avance, reasignación, borrado y barrido
+  diario BR-008 (retrasos y avisos idempotentes 30/15/5).
+  La suite completa queda en **376 casos (53 archivos)**.
+
 ### Crítico / bloqueante
 
-- **Falta la migración Prisma de `0.9.0`.** `Draft`, `ProjectDocument.milestone_id`
-  y la nueva FK `Milestone.assignee_id → user.id` solo existen en
-  `schema.prisma`; ninguna migración los crea. Un entorno nuevo queda
-  desalineado y `prisma migrate deploy` no aplica esos cambios.
 - **Proyectos creados desde convocatoria no pueden subir documentos.**
   `submitProposalToCall` crea el proyecto sin `status`, por lo que toma el
   default `Proposed` del esquema; `uploadProjectDocument` exige `Draft`. Hay que
@@ -323,10 +459,10 @@ detectadas al documentar el estado actual.
 
 ### Importante — deuda introducida en esta entrega
 
-- **Falta la migración Prisma.** `backend/prisma/migrations/` sigue con 9
-  migraciones; `Draft`, `milestone_id` y la nueva FK de `assignee_id` solo
-  existen en `schema.prisma`. Un `prisma migrate deploy` **no** crea esos
-  cambios.
+- **Migración resuelta.** `20261026000001_project_status_draft`,
+  `20261028000001_project_document_milestone_link` y las migraciones de
+  Sprint 6/7 cubren `Draft`, `milestone_id`, la FK de `assignee_id`, búsqueda,
+  invitaciones y avance de hitos.
 - **`ProjectStatus` de GraphQL no incluye `Draft`** (`projects.model.ts`),
   aunque el enum de Prisma y `registerProject` sí. Devolver un proyecto en
   `Draft` por GraphQL produce un error de serialización de enum; afecta a
@@ -845,8 +981,10 @@ Definido en `backend/prisma/schema.prisma` (PostgreSQL + `vector`).
 | `Proposal_Evaluation` | Dictamen del comité | `evaluation_id`, `project_id`, `reviewer_id`, `decision`, `justification`, `created_at` |
 | `Review_Conflict` | Alerta BR-011 | `conflict_id`, `project_id`, `reviewer_id`, `status`, `detected_at`, `resolved_at?`, `resolved_by?`, `resolution_note?`; único por `(project_id, reviewer_id)`. Los apellidos coincidentes se calculan al vuelo, no se persisten |
 | `Audit_Log` | Trazabilidad RF-017 | `log_id`, `actor_id`, `action` (varchar 255), `target_id` (varchar 255), `source_ip`, `timestamp` |
-| `Milestone` | Hitos y tareas del proyecto (US 5.2) | `milestone_id`, `project_id`, `name` (150), `assignee_id` (String → `user.id`), `due_date`, `status` (default `Pending`), documentos de evidencia |
-| `Product`, `Expense` | Productos y presupuesto | Existen en el esquema, **sin módulo, resolver ni UI** (RF-007, RF-010) |
+| `Milestone` | Hitos y tareas del proyecto (US 5.2) | `milestone_id`, `project_id`, `name` (150), `assignee_id` (String → `user.id`), `due_date`, `status` (default `Pending`), `last_progress_at`, `due_notice_days`, documentos de evidencia |
+| `Product`, `Product_Author` | Productos de investigación (RF-007) | `product_id`, `project_id`, `product_type`, `url_doi`, `title?`; autores ordenados en `Product_Author` |
+| `Team_Invitation` | Invitaciones de equipo (RF-011) | `invitation_id`, `project_id`, `email`, `user_id?`, `project_role`, `token` único, `status`, `expires_at`, `created_by`, `affidavit_signed_at`, `accepted_at?` |
+| `Expense` | Presupuesto | Existe en el esquema; el presupuesto queda fuera de alcance (F3-01). |
 
 **Enums principales**
 
@@ -885,14 +1023,26 @@ Definido en `backend/prisma/schema.prisma` (PostgreSQL + `vector`).
 | 7 | `20261016001344_evaluation_fk_alignment` | `0.5.0` | Alinea claves foráneas de evaluación con el modelo de proyectos. |
 | 8 | `20261018000001_evidence_doc_type` | `0.6.0` | Agrega `evidence` al enum `DocType`. |
 | 9 | `20261022000000_document_visibility_guard` | `0.8.0` | Enum `Visibility`, valor por defecto y restricciones de visibilidad documental. |
+| 10 | `20261026000000_reporting_dashboard` | `0.7.0` | Vistas y campos de apoyo para reportes institucionales. |
+| 11 | `20261026000001_project_status_draft` | `0.9.0` | Añade `Draft` al enum `ProjectStatus`. |
+| 12 | `20261028000000_project_archive` | `0.10.0` | Campos de archivado automático (RF-020). |
+| 13 | `20261028000001_project_document_milestone_link` | `0.9.0` | `ProjectDocument.milestone_id` y FK de `Milestone.assignee_id`. |
+| 14 | `20261113000000_notifications` | Sprint 1 | `Notification`, `Email_Outbox` y sus enums. |
+| 15 | `20261114000000_project_status_transitions` | Sprint 2 | Bitácora `Project_Status_Transition`, SLA y archivado. |
+| 16 | `20261114000001_ethics_and_retention` | Sprint 2 | Banderas éticas, revisión documental, certificación y retención. |
+| 17 | `20261114100000_sprint3_proposals_products` | Sprint 3 | `Proposal_Version` y `Product_Author`. |
+| 18 | `20261115000000_sprint5_decision_reports_departments` | Sprint 5 | `Decision_Report`, enum de estado y `User.department`. |
+| 19 | `20261116000000_search_indexes` | Sprint 6 | Columnas generadas `search_vector` e índices GIN en `Project`, `Announcement` y `user` (RF-012). |
+| 20 | `20261116000001_team_invitations` | Sprint 6 | Enum `InvitationStatus` y tabla `Team_Invitation` (RF-011). |
+| 21 | `20261116000002_milestone_progress` | Sprint 7 | `Milestone.last_progress_at`, `due_notice_days` e índice para BR-008. |
+| 22 | `20261014091910_integracion_diccionario_datos` | Histórico restaurado | Diccionario de datos; archivo recuperado de Git con checksum original. |
+| 23 | `20261019010000_us5_1_tasks_milestones` | Histórico restaurado | Hitos/tareas US 5.1; archivo recuperado de Git con checksum original. |
+| 24 | `20261029120000_us5_1_milestone_created_at` | Histórico reconstruido | `Milestone.created_at`; archivo inferido del esquema aplicado el 2026-10-29. |
 
 > Las migraciones 1–3 son anteriores a la creación de este changelog, pero sus
 > marcas de tiempo permiten reconstruir el orden exacto. No hay migraciones
-> destructivas posteriores a la 3.
->
-> **Pendiente:** `0.9.0` modificó `schema.prisma` sin agregar migración. Los
-> cambios (`Draft`, `milestone_id`, `assignee_id` como FK) **no están** en este
-> historial y deben generarse con `prisma migrate dev --name us5_2_milestones`.
+> destructivas posteriores a la 3. Las migraciones 10–21 regularizan los
+> cambios de esquema aplicados después de `0.9.0`.
 
 ---
 
@@ -1040,7 +1190,12 @@ query ProjectMilestones($projectId: Int!) {
 | `pendingConflictReviews`, `resolveConflictReview` | Query/Mutation | `ADMINISTRATOR` | BR-011 |
 | `projectDocuments` | Query | Cualquier autenticado | Filtrado por visibilidad y pertenencia |
 | `setDocumentVisibility` | Mutation | `PRINCIPAL_INVESTIGATOR` (PI dueño) | RF-005 |
-| `projectMilestones` | Query | Cualquier autenticado | **Sin validar pertenencia al proyecto** (deuda de US 5.2) |
+| `projectMilestones` | Query | Miembros, `COORDINATOR`, `ADMINISTRATOR` | Valida pertenencia; el comité no ve la ejecución |
+| `createMilestone`, `updateMilestone`, `updateMilestoneProgress`, `assignMilestone`, `deleteMilestone` | Mutation | PI/Administrador (avance también el asignado) | RF-006, BR-008 |
+| `teamMembers`, `teamInvitations`, `inviteTeamMember`, `acceptInvitation`, `revokeInvitation`, `updateTeamMemberRole` | Query/Mutation | Equipo / PI / Administrador | RF-011, BR-010 |
+| `search` | Query | Cualquier autenticado | RF-012; filtra por rol y confidencialidad |
+| `auditLog` | Query | `ADMINISTRATOR`, `COORDINATOR` | RF-017 |
+| `archivedProjects`, `archiveAlerts`, `archiveProject`, `archiveClosedProjects` | Query/Mutation | `ADMINISTRATOR` | RF-020 |
 | `POST /milestones/:id/evidence` | REST | Solo el usuario en `assignee_id` | US 5.2; completa el hito |
 | `POST /projects/:id/documents` | REST | PI del proyecto | RF-002, RF-016 |
 | `POST /projects/:id/evidence` | REST | Cualquier miembro del equipo | RF-016 |
@@ -1101,19 +1256,20 @@ Runner: **Vitest 4** (`pnpm test`, `pnpm test:cov`). Cobertura con
 | `document_upload/antivirus.service.spec.ts` | 10 | Protocolo INSTREAM y fallos |
 | `documents/documents.policy.spec.ts` | 9 | RF-005 |
 | `documents/documents.service.spec.ts` | 11 | Visibilidad y filtrado |
+| `search/search.integration.spec.ts` | 5 | FTS, filtros, paginación y BR-007 |
+| `teams/teams.integration.spec.ts` | 6 | Invitaciones, aceptación, revocación y roles |
+| `milestones/milestones.integration.spec.ts` | 10 | Alta, visibilidad, avance, borrado y barrido BR-008 |
 | `app.controller.spec.ts` | 1 | Endpoint raíz |
-| **Total** | **160** | — |
+| **Total suite** | **376** | 53 archivos; la tabla es una selección representativa |
 
 **Brechas de prueba**
 
-- **`milestones` (US 5.2) no tiene pruebas**: ni el filtrado por asignado, ni la
-  regla «solo el asignado sube evidencia», ni la transición `Draft → Proposed`,
-  ni la falta de transacción.
 - No hay pruebas de frontend (ni unitarias ni de componentes).
 - `backend/test/app.e2e-spec.ts` sigue siendo el ejemplo de NestJS; el script
   `test:e2e` existe pero no cubre flujos reales.
-- No hay pruebas de integración contra PostgreSQL real más allá de los mocks de
-  servicio.
+- Las specs de integración se omiten automáticamente si la base no está
+  disponible.
+- No hay pruebas de componentes ni de flujos E2E del frontend.
 
 ---
 
@@ -1216,20 +1372,17 @@ docker compose up --build
 
 ### Pendientes para la próxima versión
 
+> Actualizado el 2026-11-14. La tabla anterior listaba entregas que ya están
+> implementadas (migración US 5.2, dashboard real, UI de convocatorias,
+> versionado de propuestas, usuarios/roles, notificaciones, CRUD de hitos,
+> productos y exportación de reportes); se retiraron para no duplicar trabajo.
+
 | Prioridad | Tema | Requisito |
 | --- | --- | --- |
-| Alta | Generar y aplicar la migración de US 5.2 (`Draft`, `milestone_id`, FK `assignee_id`) | US 5.2 |
-| Alta | Conectar dashboard a datos reales (KPIs y embudo) | RF-008 |
-| Media | Resolver el flujo `Draft`/`Proposed` para proyectos creados por convocatoria | RF-002, RF-018 |
-| Media | UI de convocatorias (hoy solo backend) | RF-018 |
-| Media | Versionado e historial de propuestas | RF-004 |
-| Media | Gestión de usuarios y roles por administrador | RF-001 |
-| Media | Notificaciones reales de decisiones y vencimientos | RF-003 |
-| Media | CRUD de hitos (hoy solo lectura + evidencia) | RF-006 |
-| Baja | Registro de productos de investigación | RF-007 |
-| Baja | Asistente IA con RAG (pgvector ya disponible) | RF-009 |
-| Baja | Reportes exportables y series históricas | RF-008 |
+| Baja | Series históricas comparativas en el dashboard (el periodo y la exportación ya existen) | RF-008 |
 | Baja | Rename `STUDENT → RESEARCHER`, `PRINCIPAL_INVESTIGATOR → PROJECT_LEADER` | — |
+| Baja | Asistente IA con RAG real (la UI opera en modo demo; fuera de alcance de esta entrega) | RF-009 |
+| Baja | Módulo de captura de gastos (fuera de alcance F3-01; reportes ya agregan `Expense`) | RNF-005 |
 
 ---
 

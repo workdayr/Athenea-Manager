@@ -5,6 +5,11 @@ import { Roles } from '../auth/roles.decorator.js';
 import { RolesGuard } from '../auth/roles.guard.js';
 import { SessionGuard } from '../projects/session.guard.js';
 import {
+  PageInfoGql,
+  SortDirectionGql,
+} from '../common/pagination/pagination.model.js';
+import { toPageInfoGql } from '../common/pagination/pagination.policy.js';
+import {
   AuditLogFiltersInput,
   AuditLogGql,
   AuditLogPageGql,
@@ -42,6 +47,10 @@ export class AuditResolver {
     page: number,
     @Args('pageSize', { type: () => Int, nullable: true, defaultValue: 20 })
     pageSize: number,
+    @Args('sortBy', { type: () => String, nullable: true })
+    sortBy?: string,
+    @Args('sortDir', { type: () => SortDirectionGql, nullable: true })
+    sortDir?: SortDirectionGql,
   ): Promise<AuditLogPageGql> {
     const result = await this.auditService.query(
       {
@@ -53,12 +62,14 @@ export class AuditResolver {
       },
       page,
       pageSize,
+      { sortBy, sortDir },
     );
     const gql = new AuditLogPageGql();
     gql.items = result.items.map(toGql);
     gql.total = result.total;
     gql.page = result.page;
     gql.pageSize = result.pageSize;
+    gql.pageInfo = toPageInfoGql(result.pageInfo, new PageInfoGql());
     return gql;
   }
 }

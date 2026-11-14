@@ -24,10 +24,12 @@ import {
 import {
   canEvaluateStatus,
   detectFamilyConflict,
+  isSameDepartment,
   isSelfReview,
   statusAfterDecision,
   validateJustification,
 } from './proposal-evaluation.policy.js';
+import { createPendingDecisionReport } from './decision-report.service.js';
 
 /** Error de dominio: se mapea a GraphQL (extensions.code/field). */
 export class EvaluationError extends Error {
@@ -85,7 +87,12 @@ function requireAdmin(user: AuthenticatedUser): void {
 
 interface TeamRow {
   user_id: string;
-  user: { id: string; name: string; email: string };
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    department?: string | null;
+  };
   project_role: string;
 }
 
@@ -119,6 +126,25 @@ function teamNames(project: Pick<ProjectRow, 'projectUsers'>): string[] {
 
 function teamIds(project: Pick<ProjectRow, 'projectUsers'>): string[] {
   return project.projectUsers.map((member) => member.user_id);
+}
+
+function principalInvestigator(
+  project: Pick<ProjectRow, 'projectUsers'>,
+): TeamRow | undefined {
+  return project.projectUsers.find(
+    (member) => member.project_role === 'Principal_Investigator',
+  );
+}
+
+/** BR-004: departamento del evaluador y del PI (D-02: origen a confirmar). */
+async function reviewerDepartment(
+  reviewerId: string,
+): Promise<string | null> {
+  const reviewer = await prisma.user.findUnique({
+    where: { id: reviewerId },
+    select: { department: true },
+  });
+  return reviewer?.department ?? null;
 }
 
 /**
@@ -239,17 +265,24 @@ export async function proposalContext(
     });
   }
   const self = isSelfReview(viewer.id, teamIds(row));
+  const departmentConflict = isSameDepartment(
+    await reviewerDepartment(viewer.id),
+    principalInvestigator(row)?.user.department,
+  );
   const blocked =
     !canEvaluateStatus(row.status) ||
     self ||
+    departmentConflict ||
     (conflict !== null && conflict.status !== 'Cleared');
   const blockReason = !canEvaluateStatus(row.status)
     ? EVALUATION_ERROR_CODES.INVALID_STATE
     : self
       ? EVALUATION_ERROR_CODES.SELF_REVIEW
-      : conflict !== null && conflict.status !== 'Cleared'
-        ? EVALUATION_ERROR_CODES.FAMILY_CONFLICT
-        : null;
+      : departmentConflict
+        ? EVALUATION_ERROR_CODES.DEPARTMENT_CONFLICT
+        : conflict !== null && conflict.status !== 'Cleared'
+          ? EVALUATION_ERROR_CODES.FAMILY_CONFLICT
+          : null;
   return {
     project_id: row.project_id,
     title: row.title,
@@ -334,6 +367,22 @@ const row = (await getProjectWithTeamForEvaluation(data.projectId)) as unknown a
       403,
     );
   }
+  // F1-10 / BR-004: tampoco puede evaluar un proyecto cuyo PI pertenece a
+  // su mismo departamento academico.
+  const piMember = principalInvestigator(row);
+  if (
+    piMember &&
+    isSameDepartment(
+      await reviewerDepartment(viewer.id),
+      piMember.user.department,
+    )
+  ) {
+    fail(
+      EVALUATION_ERROR_CODES.DEPARTMENT_CONFLICT,
+      'No puedes evaluar un proyecto del mismo departamento que el Investigador Principal (BR-004).',
+      403,
+    );
+  }
   const matched = detectFamilyConflict(viewer.name, teamNames(row));
   const existing = (await prisma.review_Conflict.findFirst({
     where: { project_id: data.projectId, reviewer_id: viewer.id },
@@ -396,6 +445,9 @@ const row = (await getProjectWithTeamForEvaluation(data.projectId)) as unknown a
         justification: data.justification.trim(),
       },
     });
+    // F1-10 / RF-019: el dictamen nace pendiente en la MISMA transaccion;
+    // el worker in-process lo genera despues sin bloquear la respuesta.
+    await createPendingDecisionReport(tx, evaluation.evaluation_id);
     // F1-02: el historial y el SLA se actualizan en la misma transaccion.
     const applied = await applyStatusTransition(tx, {
       projectId: data.projectId,

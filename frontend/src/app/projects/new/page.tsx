@@ -12,6 +12,12 @@ import {
   uploadProjectDocument,
   type RegisterProjectResult,
 } from '@/lib/apollo-client';
+import {
+  fetchCall,
+  formatCallDate,
+  isAcceptingApplications,
+  type Call,
+} from '@/lib/calls';
 
 const TITLE_MAX = 300;
 const OBJECTIVES_MAX = 2000;
@@ -58,6 +64,9 @@ export default function NewProjectPage() {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState('');
   const [modal, setModal] = useState<Modal>(null);
+  // F1-09 / RF-018: postulacion desde /calls/[callId]?callId=N.
+  const [callId, setCallId] = useState<number | null>(null);
+  const [call, setCall] = useState<Call | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -77,6 +86,21 @@ export default function NewProjectPage() {
         return;
       }
       setChecking(false);
+
+      const requestedCallId = Number(
+        new URLSearchParams(window.location.search).get('callId'),
+      );
+      if (Number.isInteger(requestedCallId) && requestedCallId > 0) {
+        setCallId(requestedCallId);
+        fetchCall(requestedCallId)
+          .then((result) => {
+            if (active) {
+              setCall(result);
+            }
+          })
+          .catch(() => undefined);
+      }
+
       getApolloClient()
         .query<{ activeProjectCount: number }>({
           query: ACTIVE_PROJECT_COUNT_QUERY,
@@ -117,6 +141,24 @@ export default function NewProjectPage() {
       toast.error('La fecha de fin debe ser posterior a la de inicio.');
       return;
     }
+    // F1-09: la convocatoria debe seguir aceptando postulaciones. El
+    // backend lo vuelve a validar con bloqueo de fila (cupo/deadline).
+    if (callId !== null) {
+      if (!call) {
+        toast.error(
+          'No se pudo verificar la convocatoria seleccionada. Recarga e intenta de nuevo.',
+        );
+        return;
+      }
+      if (!isAcceptingApplications(call)) {
+        toast.error(
+          call.remainingSlots <= 0
+            ? 'La convocatoria alcanzó su cupo máximo (CALL_FULL).'
+            : 'La convocatoria está cerrada o alcanzó su fecha límite (CALL_CLOSED).',
+        );
+        return;
+      }
+    }
     for (const doc of REQUIRED_DOCS) {
       const file = files[doc.type];
       if (!file) {
@@ -147,6 +189,7 @@ export default function NewProjectPage() {
             researchInvolvesAnimals,
             usesSensitiveData,
             isConfidential,
+            ...(callId !== null ? { callId } : {}),
           },
         },
       });
@@ -170,6 +213,21 @@ export default function NewProjectPage() {
       const code = graphqlErrorCode(submitError);
       if (code === 'PI_LIMIT_EXCEEDED') {
         toast.error('Alcanzaste el limite de 3 proyectos activos (BR-002).');
+      } else if (code === 'CALL_FULL') {
+        toast.error(
+          'La convocatoria alcanzó su cupo máximo y se cerró. Elige otra convocatoria.',
+          'Postulación rechazada',
+        );
+      } else if (code === 'CALL_CLOSED') {
+        toast.error(
+          'La convocatoria está cerrada o alcanzó su fecha límite.',
+          'Postulación rechazada',
+        );
+      } else if (code === 'ALREADY_APPLIED') {
+        toast.error(
+          'Ya tienes una postulación registrada en esta convocatoria.',
+          'Postulación duplicada',
+        );
       } else {
         toast.error(
           submitError instanceof Error
@@ -222,6 +280,14 @@ export default function NewProjectPage() {
             ? 'Verificando cupo BR-002…'
             : `Regla BR-002: ${activeCount} de ${MAX_ACTIVE} activos · ${slotsLeft} cupo(s) disponible(s)`}
         </p>
+
+        {callId !== null && (
+          <p className="mt-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+            {call
+              ? `Postulando a la convocatoria "${call.title}" · Cierre: ${formatCallDate(call.deadline)} · ${call.remainingSlots} cupo(s) restante(s)`
+              : 'Verificando la convocatoria seleccionada…'}
+          </p>
+        )}
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-6" noValidate>
           <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">

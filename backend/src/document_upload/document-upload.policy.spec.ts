@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DOCUMENT_ERROR_CODES, MAX_FILE_BYTES } from './document-upload.constants.js';
-import { MAX_FILE_BYTES as MAX_FILE_BYTES_PROJECTS } from '../projects/projects.constants.js';
+import { DOCUMENT_ERROR_CODES } from './document-upload.constants.js';
+import { MAX_FILE_BYTES } from '../projects/projects.constants.js';
 import {
   checkProjectQuota,
   detectFileType,
@@ -8,7 +8,7 @@ import {
   validateEvidenceUpload,
 } from './document-upload.policy.js';
 
-const MAX_FILE_BYTES_TEST = MAX_FILE_BYTES_PROJECTS ?? MAX_FILE_BYTES;
+
 
 describe('extractFileExtension', () => {
   it('extrae extension en minusculas', () => {
@@ -85,7 +85,7 @@ describe('validateEvidenceUpload (RF-016, RNF-005)', () => {
   it('rechaza archivo mas de 25 MB', () => {
     const issues = validateEvidenceUpload({
       ...validPdf,
-      size: MAX_FILE_BYTES_TEST + 1,
+      size: MAX_FILE_BYTES + 1,
     });
     expect(issues).toHaveLength(1);
     expect(issues[0].code).toBe(DOCUMENT_ERROR_CODES.PAYLOAD_TOO_LARGE);
@@ -94,7 +94,7 @@ describe('validateEvidenceUpload (RF-016, RNF-005)', () => {
 
   it('acepta archivo exactamente de 25 MB', () => {
     expect(
-      validateEvidenceUpload({ ...validPdf, size: MAX_FILE_BYTES_TEST }),
+      validateEvidenceUpload({ ...validPdf, size: MAX_FILE_BYTES }),
     ).toEqual([]);
   });
 
@@ -103,7 +103,7 @@ describe('validateEvidenceUpload (RF-016, RNF-005)', () => {
     const issues = validateEvidenceUpload({
       buffer: Buffer.from([0x25, 0x50, 0x44, 0x46, 0x2d]), // PDF magico
       originalname: 'malo.png', // dice ser PNG pero es PDF
-      size: MAX_FILE_BYTES_TEST + 1,
+      size: MAX_FILE_BYTES + 1,
     });
     expect(issues.length).toBeGreaterThanOrEqual(2);
   });

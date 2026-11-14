@@ -3,6 +3,12 @@ import type { Visibility } from '../generated/prisma/client.js';
 import { PROJECT_ERROR_CODES } from '../projects/projects.constants.js';
 import { assertProjectWritable } from '../projects/project-write-guard.js';
 import type { AuthenticatedUser } from '../projects/session.guard.js';
+import {
+  normalizePageArgs,
+  orderByFrom,
+  PAGINATION_MAX_PAGE_SIZE,
+  type PageArgs,
+} from '../common/pagination/pagination.policy.js';
 import { visibilityChangeAuditAction } from './documents.constants.js';
 import {
   isReviewableDocument,
@@ -230,6 +236,7 @@ export async function setDocumentVisibility(
 export async function listProjectDocuments(
   user: AuthenticatedUser,
   projectId: number,
+  paging: PageArgs = {},
 ): Promise<ProjectDocumentView[]> {
   const project = await prisma.project.findUnique({
     where: { project_id: projectId },
@@ -251,6 +258,12 @@ export async function listProjectDocuments(
     );
   }
 
+  // F2-03 / RF-013: paginacion y orden del lado del servidor.
+  const ordering = normalizePageArgs(
+    { ...paging, pageSize: paging.pageSize ?? PAGINATION_MAX_PAGE_SIZE },
+    ['uploadedAt', 'docType', 'version'],
+    { sortBy: 'uploadedAt', sortDir: 'desc' },
+  );
   const documents = await prisma.projectDocument.findMany({
     where: {
       project_id: projectId,
@@ -258,7 +271,14 @@ export async function listProjectDocuments(
         ? {}
         : { visibility: 'Shared_with_administration' as Visibility }),
     },
-    orderBy: { uploaded_at: 'desc' },
+    orderBy:
+      orderByFrom(ordering, {
+        uploadedAt: 'uploaded_at',
+        docType: 'doc_type',
+        version: 'version',
+      }) ?? { uploaded_at: 'desc' },
+    skip: ordering.skip,
+    take: ordering.take,
     include: { reviewer: { select: { name: true } } },
   });
 

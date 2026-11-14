@@ -3,7 +3,7 @@ import { CALL_ERROR_CODES } from './calls.constants.js';
 
 const FUTURE = new Date('2026-12-31T23:59:59Z');
 
-const { sqlLog, state, tx } = vi.hoisted(() => {
+const { sqlLog, state, tx, announcement } = vi.hoisted(() => {
   const sqlLog: string[] = [];
   const state = {
     status: 'OPEN',
@@ -46,11 +46,21 @@ const { sqlLog, state, tx } = vi.hoisted(() => {
       create: async () => ({ project_id: 99 }),
     },
   };
-  return { sqlLog, state, tx };
+  // Cierre posterior al rollback (CALL_FULL / deadline vencido).
+  const announcement = {
+    updateMany: async (args: { data: { status?: string } }) => {
+      if (args.data.status) state.status = args.data.status;
+      return { count: 1 };
+    },
+  };
+  return { sqlLog, state, tx, announcement };
 });
 
 vi.mock('../db/prisma.js', () => ({
-  prisma: { $transaction: (fn: (t: unknown) => unknown) => fn(tx) },
+  prisma: {
+    $transaction: (fn: (t: unknown) => unknown) => fn(tx),
+    announcement,
+  },
 }));
 
 import { submitProposalToCall } from './calls.service.js';

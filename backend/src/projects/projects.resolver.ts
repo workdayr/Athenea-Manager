@@ -11,6 +11,7 @@ import { GraphQLError } from 'graphql';
 import { ROLES } from '../auth/roles.constants.js';
 import { Roles } from '../auth/roles.decorator.js';
 import { RolesGuard } from '../auth/roles.guard.js';
+import { SortDirectionGql } from '../common/pagination/pagination.model.js';
 import { CurrentUser } from './current-user.decorator.js';
 import {
   ProjectGql,
@@ -102,8 +103,18 @@ export class ProjectsResolver {
   @Query(() => [ProjectGql])
   async myProjects(
     @CurrentUser() user: AuthenticatedUser,
+    @Args('page', { type: () => Int, nullable: true }) page?: number,
+    @Args('pageSize', { type: () => Int, nullable: true }) pageSize?: number,
+    @Args('sortBy', { type: () => String, nullable: true }) sortBy?: string,
+    @Args('sortDir', { type: () => SortDirectionGql, nullable: true })
+    sortDir?: SortDirectionGql,
   ): Promise<ProjectGql[]> {
-    const rows = (await myProjects(user)) as unknown as ProjectRow[];
+    const rows = (await myProjects(user, {
+      page,
+      pageSize,
+      sortBy,
+      sortDir,
+    })) as unknown as ProjectRow[];
     return rows.map((row) => toProjectGql(row, user));
   }
 

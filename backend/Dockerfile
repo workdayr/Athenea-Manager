@@ -26,6 +26,8 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 RUN addgroup -g 1001 -S nodejs && adduser -S nestjs -u 1001
+# F1-08: el volumen de uploads hereda este dueno al crearse.
+RUN mkdir -p /app/uploads && chown -R nestjs:nodejs /app/uploads
 
 COPY --from=prod-deps /app/node_modules ./node_modules
 # El cliente Prisma generado vive en src/generated y ya esta compilado

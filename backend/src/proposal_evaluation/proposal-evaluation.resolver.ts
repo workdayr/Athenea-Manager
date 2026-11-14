@@ -12,6 +12,8 @@ import {
 import {
   ConflictGql,
   ConflictStatusGql,
+  DecisionReportGql,
+  DecisionReportStatusGql,
   DecisionResultGql,
   EvaluationDecisionGql,
   EvaluationRecordGql,
@@ -32,6 +34,7 @@ import {
   type ProposalContext,
 } from './proposal-evaluation.service.js';
 import { UNKNOWN_ACTOR_IP } from './proposal-evaluation.constants.js';
+import { decisionReportStatus } from './decision-report.service.js';
 
 interface GraphQLContext {
   req?: {
@@ -228,6 +231,26 @@ export class ProposalEvaluationResolver {
     } catch (error) {
       toGraphQLError(error);
     }
+  }
+
+  /**
+   * F1-10 / RF-019: estado del dictamen PDF. Sin `@Roles` porque tambien
+   * el equipo del proyecto puede consultarlo; el servicio autoriza.
+   */
+  @Query(() => DecisionReportGql)
+  async decisionReportStatus(
+    @Args('evaluationId', { type: () => Int }) evaluationId: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<DecisionReportGql> {
+    const row = await decisionReportStatus(user, evaluationId);
+    const report = new DecisionReportGql();
+    report.reportId = row.report_id;
+    report.evaluationId = row.evaluation_id;
+    report.status = row.status as DecisionReportStatusGql;
+    report.readyAt = row.ready_at;
+    report.error = row.error;
+    report.attempts = row.attempts;
+    return report;
   }
 
   @Query(() => [ConflictGql])
