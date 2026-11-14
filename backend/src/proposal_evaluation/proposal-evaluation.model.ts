@@ -36,7 +36,7 @@ registerEnumType(DecisionReportStatusGql, {
 });
 
 @ObjectType()
-export class TeamMemberGql {
+export class ProposalTeamMemberGql {
   @Field(() => ID)
   userId!: string;
 
@@ -146,8 +146,8 @@ export class ProposalContextGql {
   @Field(() => GraphQLISODateTime)
   endDate!: Date;
 
-  @Field(() => [TeamMemberGql])
-  team!: TeamMemberGql[];
+  @Field(() =>  [ProposalTeamMemberGql])
+  team!: ProposalTeamMemberGql[];
 
   /** Historial formal de decisiones (RF-004), mas reciente primero. */
   @Field(() => [EvaluationRecordGql])

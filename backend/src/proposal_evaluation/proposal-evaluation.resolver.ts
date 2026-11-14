@@ -21,7 +21,7 @@ import {
   ProposalSummaryGql,
   ResolveConflictInput,
   SubmitDecisionInput,
-  TeamMemberGql,
+  ProposalTeamMemberGql,
 } from './proposal-evaluation.model.js';
 import {
   EvaluationError,
@@ -120,7 +120,7 @@ function toContext(
   detail.startDate = ctx.start_date;
   detail.endDate = ctx.end_date;
   detail.team = ctx.team.map((member) => {
-    const item = new TeamMemberGql();
+    const item = new ProposalTeamMemberGql();
     item.userId = member.user_id;
     item.name = member.name;
     item.email = member.email;
