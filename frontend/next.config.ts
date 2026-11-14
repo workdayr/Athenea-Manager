@@ -33,6 +33,11 @@ const nextConfig: NextConfig = {
         source: "/api/milestones/:path*",
         destination: `${backendURL}/milestones/:path*`,
       },
+      // F1-05: Descarga protegida y streaming de documentos (RNF-005)
+      {
+        source: "/api/documents/:path*",
+        destination: `${backendURL}/documents/:path*`,
+      },
     ];
   },
 };

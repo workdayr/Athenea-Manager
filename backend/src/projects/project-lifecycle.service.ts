@@ -194,6 +194,18 @@ export async function assertTransitionConditions(
         409,
       );
     }
+
+    // BR-009: exigir al menos un producto de investigacion registrado
+    const productCount = await prisma.product.count({
+      where: { project_id: project.project_id },
+    });
+    if (productCount === 0) {
+      fail(
+        LIFECYCLE_ERROR_CODES.RESEARCH_OUTPUT_REQUIRED,
+        'Se requiere registrar al menos un producto de investigacion para marcar el proyecto como completado (BR-009).',
+        409,
+      );
+    }
   }
 }
 

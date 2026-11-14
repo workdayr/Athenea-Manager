@@ -10,7 +10,9 @@ import { DocumentUploadModule } from './document_upload/document-upload.module.j
 import { DocumentsModule } from './documents/documents.module.js';
 import { HealthModule } from './health/health.module.js';
 import { NotificationsModule } from './notifications/notifications.module.js';
+import { ProductsModule } from './products/products.module.js';
 import { ProposalEvaluationModule } from './proposal_evaluation/proposal-evaluation.module.js';
+import { ProposalVersionsModule } from './proposal_versions/proposal-versions.module.js';
 import { ProjectsModule } from './projects/projects.module.js';
 import { MilestonesModule } from './milestones/milestones.module.js';
 import { ReportingModule } from './reporting/reporting.module.js';
@@ -43,6 +45,8 @@ import { ReportingModule } from './reporting/reporting.module.js';
     NotificationsModule,
     HealthModule,
     AuditModule,
+    ProductsModule,
+    ProposalVersionsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

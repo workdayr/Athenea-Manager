@@ -343,6 +343,7 @@ export interface DashboardTask {
 
 export interface DashboardDocument {
   id: string;
+  documentId?: number;
   name: string;
   type: string;
   size: string;

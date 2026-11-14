@@ -39,6 +39,8 @@ export const LIFECYCLE_ERROR_CODES = {
   ETHICS_APPROVAL_REQUIRED: 'ETHICS_APPROVAL_REQUIRED',
   /** BR-003: el informe final no esta aprobado. */
   FINAL_REPORT_NOT_APPROVED: 'FINAL_REPORT_NOT_APPROVED',
+  /** BR-009: se requiere al menos un producto de investigacion para completar el proyecto. */
+  RESEARCH_OUTPUT_REQUIRED: 'RESEARCH_OUTPUT_REQUIRED',
 } as const;
 
 export interface TransitionRule {

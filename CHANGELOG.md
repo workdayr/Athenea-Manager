@@ -173,6 +173,36 @@ detectadas al documentar el estado actual.
   fechas de retención, los índices y los valores `Retention`/`Sla` del enum
   `NotificationType`.
 
+### Añadido — Sprint 3 (2026-11-14)
+
+- **Versiones e historial de propuestas (F1-03 / RF-004, UC-004).**
+  Tabla inmutable `Proposal_Version` vinculada con los documentos del
+  proyecto (`ProjectDocument.proposal_version_id`). Endpoint multipart
+  `POST /projects/:id/proposal-versions` para que el PI someta versiones
+  revisadas tras un dictamen `Revision_Required` del comité, con límite de 5
+  versiones retenidas (`VERSION_LIMIT_REACHED`), cuota de 500 MB y 25 MB por
+  archivo. Al subir la versión el proyecto vuelve a `Under_Review`, se registra
+  auditoría `upload_proposal_version:vN` y se notifica al comité de evaluación.
+  Query GraphQL `proposalVersions(projectId)` e interfaz en el expediente.
+- **Registro de productos de investigación (F1-04 / RF-007, UC-008, BR-009).**
+  Tabla `Product` extendida con título y `Product_Author` para autores con
+  orden asignado. Mutación GraphQL `registerResearchOutput(input)` accesible
+  por el PI en proyectos `Active` o `Completed`, con validación de los 5 tipos
+  académicos y formato regex de URL/DOI (`INVALID_URL_DOI`), junto con auditoría
+  `register_research_output:<type>`. Query GraphQL `projectProducts(projectId)`
+  y compuerta BR-009 en `transitionProjectStatus` hacia `Completed`
+  (`RESEARCH_OUTPUT_REQUIRED`).
+- **Descarga protegida de documentos (F1-05 / RNF-005).**
+  Servicio de tokens HMAC temporales con expiración de 5 minutos
+  (`GET /documents/:id/download`). Endpoint de streaming de archivos
+  `GET /documents/:id/file?token=...` con código `410 Gone` ante tokens
+  expirados y verificación de visibilidad (incluye proyectos archivados en
+  modo solo lectura). Botones de descarga habilitados en el expediente documental
+  y en el dashboard de proyecto.
+- **Migración `20261114100000_sprint3_proposals_products`.** Idempotente: crea
+  las tablas `Proposal_Version` y `Product_Author`, y añade las columnas y
+  claves foráneas requeridas.
+
 ### Crítico / bloqueante
 
 - **Falta la migración Prisma de `0.9.0`.** `Draft`, `ProjectDocument.milestone_id`

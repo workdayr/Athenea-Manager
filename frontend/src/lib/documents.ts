@@ -331,3 +331,33 @@ export function documentActionErrorMessage(error: unknown): string {
   }
   return 'No se pudo completar la operación. Intenta de nuevo.';
 }
+
+/**
+ * F1-05 / RNF-005: Descarga protegida de documentos con token firmado temporal.
+ */
+export async function downloadProjectDocument(documentId: number): Promise<void> {
+  const response = await fetch(`/api/documents/${documentId}/download`, {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    let msg = 'No se pudo generar el enlace de descarga.';
+    try {
+      const body = await response.json();
+      if (body.message) msg = body.message;
+    } catch {}
+    throw new Error(msg);
+  }
+
+  const { url } = (await response.json()) as { url: string };
+  // Crear enlace temporal para disparar la descarga
+  const a = document.createElement('a');
+  a.href = url;
+  a.setAttribute('download', '');
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}

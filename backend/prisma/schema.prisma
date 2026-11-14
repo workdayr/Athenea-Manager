@@ -61,6 +61,9 @@ model User {
   statusTransitions         Project_Status_Transition[] @relation("StatusTransitionActor")
   anonymizationCertifications Project[]                @relation("AnonymizationCertifier")
   documentReviews           ProjectDocument[]           @relation("DocumentReviewer")
+  // Sprint 3 (F1-03 y F1-04): versiones de propuesta y productos de investigacion.
+  submittedProposalVersions Proposal_Version[]          @relation("ProposalVersionSubmitter")
+  authoredProducts          Product_Author[]
 
   @@unique([email])
   @@map("user")
@@ -274,6 +277,8 @@ model Project {
   archiveAlerts   Archive_Alert[]
   // F1-02: historial de transiciones de estado.
   statusTransitions Project_Status_Transition[]
+  // F1-03: versiones e historial de propuestas (RF-004).
+  proposalVersions  Proposal_Version[]
   // F1-11: usuario que certifico la anonimizacion.
   anonymizationCertifier User? @relation("AnonymizationCertifier", fields: [anonymization_certified_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
 
@@ -325,13 +330,18 @@ model ProjectDocument {
   reviewed_by   String?
   review_notes  String?              @db.Text
 
-  project         Project     @relation(fields: [project_id], references: [project_id])
+  // F1-03: vinculacion opcional con la version de propuesta (RF-004)
+  proposal_version_id Int?
+
+  project          Project           @relation(fields: [project_id], references: [project_id])
   // NUEVO: Relación inversa
-  milestone       Milestone?  @relation(fields: [milestone_id], references: [milestone_id])
-  reviewer        User?       @relation("DocumentReviewer", fields: [reviewed_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  milestone        Milestone?        @relation(fields: [milestone_id], references: [milestone_id])
+  reviewer         User?             @relation("DocumentReviewer", fields: [reviewed_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  proposal_version Proposal_Version? @relation(fields: [proposal_version_id], references: [version_id], onDelete: SetNull, onUpdate: Cascade)
 
   @@index([project_id])
   @@index([milestone_id])
+  @@index([proposal_version_id])
   @@index([project_id, doc_type, review_status])
 }
 
@@ -380,12 +390,54 @@ model Product {
   project_id      Int
   product_type    ProductType
   url_doi         String
+  title           String?     @db.VarChar(300)
+  created_at      DateTime    @default(now()) @db.Timestamp()
 
   // Llaves foráneas
-  project         Project     @relation(fields: [project_id], references: [project_id])
+  project         Project          @relation(fields: [project_id], references: [project_id])
+  authors         Product_Author[]
 
   // RF-008: productividad cientifica por proyecto.
   @@index([project_id])
+}
+
+/**
+ * F1-04 / RF-007: autores de un producto de investigacion con orden.
+ */
+model Product_Author {
+  author_id    Int     @id @default(autoincrement())
+  product_id   Int
+  user_id      String
+  author_order Int     @default(1)
+
+  product      Product @relation(fields: [product_id], references: [product_id], onDelete: Cascade, onUpdate: Cascade)
+  user         User    @relation(fields: [user_id], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([product_id, author_order])
+  @@index([user_id])
+}
+
+/**
+ * F1-03 / RF-004: historial inmutable de versiones de propuestas evaluadas.
+ * Cada revision crea una version (maximo 5) e incrementa `version_number`.
+ */
+model Proposal_Version {
+  version_id         Int           @id @default(autoincrement())
+  project_id         Int
+  version_number     Int
+  submitted_by       String
+  submitted_at       DateTime      @default(now()) @db.Timestamp()
+  status             ProjectStatus @default(Under_Review)
+  committee_comments String?       @db.Text
+  created_at         DateTime      @default(now()) @db.Timestamp()
+
+  project            Project           @relation(fields: [project_id], references: [project_id], onDelete: Cascade, onUpdate: Cascade)
+  submitter          User              @relation("ProposalVersionSubmitter", fields: [submitted_by], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  documents          ProjectDocument[]
+
+  @@unique([project_id, version_number])
+  @@index([project_id, created_at])
+  @@index([submitted_by])
 }
 
 model Expense {
