@@ -1,4 +1,5 @@
 import { prisma } from '../db/prisma.js';
+import { notifyRole } from '../notifications/notifications.service.js';
 import type { AuthenticatedUser } from '../projects/session.guard.js';
 import {
   normalizePageArgs,
@@ -53,7 +54,7 @@ export async function createCall(
     const first = issues[0] as { field: string; message: string };
     fail(CALL_ERROR_CODES.VALIDATION_ERROR, first.message, 400, first.field);
   }
-  return prisma.announcement.create({
+  const created = await prisma.announcement.create({
     data: {
       title: data.title.trim(),
       description: data.description.trim(),
@@ -62,6 +63,17 @@ export async function createCall(
       status: 'DRAFT',
     },
   });
+
+  void notifyRole(prisma, 'ADMINISTRATOR', {
+    type: 'System',
+    title: 'Nueva convocatoria creada',
+    message: `Se ha creado la convocatoria "${created.title}" (ID ${created.call_id}).`,
+    link: `/calls/${created.call_id}`,
+  }).catch(() => {
+    /* notificacion best-effort */
+  });
+
+  return created;
 }
 
 /**
@@ -97,10 +109,21 @@ export async function publishCall(user: AuthenticatedUser, callId: number) {
       'deadline',
     );
   }
-  return prisma.announcement.update({
+  const published = await prisma.announcement.update({
     where: { call_id: callId },
     data: { status: 'OPEN', date_published: new Date() },
   });
+
+  void notifyRole(prisma, 'ADMINISTRATOR', {
+    type: 'System',
+    title: 'Convocatoria publicada',
+    message: `La convocatoria "${published.title}" (ID ${published.call_id}) esta abierta.`,
+    link: `/calls/${published.call_id}`,
+  }).catch(() => {
+    /* notificacion best-effort */
+  });
+
+  return published;
 }
 
 /** Cierre manual del admin (idempotente). */
@@ -118,10 +141,21 @@ export async function closeCall(user: AuthenticatedUser, callId: number) {
     );
   }
   if (call.status === 'CLOSED') return call;
-  return prisma.announcement.update({
+  const closed = await prisma.announcement.update({
     where: { call_id: callId },
     data: { status: 'CLOSED' },
   });
+
+  void notifyRole(prisma, 'ADMINISTRATOR', {
+    type: 'System',
+    title: 'Convocatoria cerrada',
+    message: `La convocatoria "${closed.title}" (ID ${closed.call_id}) se ha cerrado.`,
+    link: `/calls/${closed.call_id}`,
+  }).catch(() => {
+    /* notificacion best-effort */
+  });
+
+  return closed;
 }
 
 /**
@@ -133,6 +167,18 @@ export async function closeExpiredCalls(now: Date = new Date()) {
     where: { status: 'OPEN', deadline: { lte: now } },
     data: { status: 'CLOSED' },
   });
+
+  if (result.count > 0) {
+    void notifyRole(prisma, 'ADMINISTRATOR', {
+      type: 'System',
+      title: 'Convocatorias cerradas automaticamente',
+      message: `Se cerraron ${result.count} convocatoria(s) vencidas.`,
+      link: '/calls',
+    }).catch(() => {
+      /* notificacion best-effort */
+    });
+  }
+
   return result.count;
 }
 
