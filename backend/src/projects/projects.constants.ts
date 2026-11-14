@@ -30,10 +30,24 @@ export const PROJECT_QUOTA_BYTES = 500 * 1024 * 1024;
 export const MAX_ACTIVE_PROJECTS_PER_PI = 3;
 
 /**
- * Estados que cuentan como "activo" para BR-002. Cerrados, rechazados o
- * completados liberan cupo.
+ * Estados que cuentan como "activo" para BR-002. Incluye `Draft` para que un
+ * PI no pueda acumular borradores sin limite. Cerrados, rechazados,
+ * completados o suspendidos liberan cupo.
  */
 export const ACTIVE_PROJECT_STATUSES = [
+  'Draft',
+  'Proposed',
+  'Under_Review',
+  'Approved',
+  'Active',
+] as const;
+
+/**
+ * Estados en los que el proyecto admite nuevas evidencias. `Draft` queda
+ * fuera: el expediente aun no se ha enviado y solo se cargan los 5 PDF de
+ * registro.
+ */
+export const OPEN_PROJECT_STATUSES = [
   'Proposed',
   'Under_Review',
   'Approved',

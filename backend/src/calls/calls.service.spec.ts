@@ -10,6 +10,7 @@ const { sqlLog, state, tx } = vi.hoisted(() => {
     deadline: new Date('2026-12-31T23:59:59Z'),
     cap: 2,
     count: 0,
+    existingApplications: 0,
   };
   const tx = {
     $queryRaw: async (strings: TemplateStringsArray) => {
@@ -41,6 +42,7 @@ const { sqlLog, state, tx } = vi.hoisted(() => {
       },
     },
     project: {
+      count: async () => state.existingApplications,
       create: async () => ({ project_id: 99 }),
     },
   };
@@ -74,6 +76,7 @@ describe('submitProposalToCall cableado real (RF-018)', () => {
     state.status = 'OPEN';
     state.deadline = FUTURE;
     state.count = 0;
+    state.existingApplications = 0;
   });
 
   it('emite SELECT ... FOR UPDATE dentro de la transaccion', async () => {
@@ -101,5 +104,16 @@ describe('submitProposalToCall cableado real (RF-018)', () => {
     });
     expect(state.count).toBe(2);
     expect(state.status).toBe('CLOSED');
+  });
+
+  it('bloquea una segunda postulacion del mismo PI a la convocatoria', async () => {
+    state.existingApplications = 1;
+    await expect(submitProposalToCall(user, data)).rejects.toMatchObject({
+      code: CALL_ERROR_CODES.ALREADY_APPLIED,
+      httpStatus: 409,
+    });
+    // No consume cupo ni cierra la convocatoria.
+    expect(state.count).toBe(0);
+    expect(state.status).toBe('OPEN');
   });
 });

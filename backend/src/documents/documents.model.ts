@@ -34,6 +34,19 @@ registerEnumType(DocTypeGql, {
   description: 'Tipo documental del expediente del proyecto.',
 });
 
+/** F1-11 / BR-003: estado de revision administrativa del documento. */
+export enum DocumentReviewStatusGql {
+  Pending = 'Pending',
+  Approved = 'Approved',
+  Rejected = 'Rejected',
+}
+
+registerEnumType(DocumentReviewStatusGql, {
+  name: 'DocumentReviewStatus',
+  description:
+    'Pending = aun no revisado; Approved = aprobado por la administracion; Rejected = rechazado.',
+});
+
 @ObjectType()
 export class ProjectDocumentGql {
   @Field(() => Int)
@@ -67,4 +80,21 @@ export class ProjectDocumentGql {
   /** El usuario actual puede cambiarla (PI + proyecto no terminal + no obligatorio). */
   @Field()
   canChangeVisibility!: boolean;
+
+  /** F1-11 / BR-003: estado de revision administrativa. */
+  @Field(() => DocumentReviewStatusGql)
+  reviewStatus!: DocumentReviewStatusGql;
+
+  @Field(() => GraphQLISODateTime, { nullable: true })
+  reviewedAt!: Date | null;
+
+  @Field(() => String, { nullable: true })
+  reviewerName!: string | null;
+
+  @Field(() => String, { nullable: true })
+  reviewNotes!: string | null;
+
+  /** El usuario actual puede aprobar/rechazar este documento. */
+  @Field()
+  canReview!: boolean;
 }

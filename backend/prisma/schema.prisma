@@ -54,6 +54,13 @@ model User {
   resolvedConflicts Review_Conflict[]     @relation("ConflictResolver")
   // NUEVO: Relación con las tareas asignadas (US 5.2)
   assignedMilestones Milestone[]
+  // RF-014: notificaciones in-app y correos encolados del usuario.
+  notifications      Notification[]
+  // F1-02 / F1-11: historial de estados, certificacion de anonimizacion y
+  // revision documental (BR-003/BR-012).
+  statusTransitions         Project_Status_Transition[] @relation("StatusTransitionActor")
+  anonymizationCertifications Project[]                @relation("AnonymizationCertifier")
+  documentReviews           ProjectDocument[]           @relation("DocumentReviewer")
 
   @@unique([email])
   @@map("user")
@@ -157,6 +164,18 @@ enum Visibility {
   Shared_with_administration
 }
 
+/**
+ * BR-003 / F1-11: estado de revision de un documento del expediente.
+ * El informe final (`results`) debe estar `Approved` para completar el
+ * proyecto; la aprobacion de etica (`ethics_approval`) debe estar
+ * `Approved` para aprobar proyectos con humanos/animales/datos sensibles.
+ */
+enum DocumentReviewStatus {
+  Pending
+  Approved
+  Rejected
+}
+
 // NUEVO: Enum para el estado de las tareas (US 5.2)
 enum MilestoneStatus {
   Pending
@@ -215,6 +234,26 @@ model Project {
   // Opcional para no bloquear registros fuera de convocatoria.
   call_id         Int?
 
+  // F1-11 / BR-006: banderas de investigacion sensible declaradas en el
+  // alta. Las de investigacion solo pueden corregirse antes de Approved.
+  research_involves_humans  Boolean @default(false)
+  research_involves_animals Boolean @default(false)
+  uses_sensitive_data       Boolean @default(false)
+
+  // F1-11 / BR-012: certificacion de anonimizacion a nivel de proyecto.
+  anonymization_certified    Boolean   @default(false)
+  anonymization_certified_at DateTime? @db.Timestamp()
+  anonymization_certified_by String?
+
+  // F1-11 / BR-013: retencion de proyectos con seres humanos.
+  retention_delete_at   DateTime? @db.Timestamp()
+  retention_notified_at DateTime? @db.Timestamp()
+  retention_deleted_at  DateTime? @db.Timestamp()
+
+  // F1-02: fecha del ultimo cambio de estado y marca de aviso SLA.
+  status_changed_at DateTime  @default(now()) @db.Timestamp()
+  sla_notified_at   DateTime? @db.Timestamp()
+
   // RF-020: archivo institucional inmutable. El proyecto conserva su
   // informacion, pero ninguna operacion de escritura puede modificarla.
   is_read_only    Boolean       @default(false)
@@ -233,12 +272,21 @@ model Project {
   // RF-020: snapshot inmutable y alertas de archivado fallido.
   archive         Project_Archive?
   archiveAlerts   Archive_Alert[]
+  // F1-02: historial de transiciones de estado.
+  statusTransitions Project_Status_Transition[]
+  // F1-11: usuario que certifico la anonimizacion.
+  anonymizationCertifier User? @relation("AnonymizationCertifier", fields: [anonymization_certified_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
 
   // RF-008 / RF-013: indices para el dashboard institucional.
   @@index([status])
   @@index([status, is_read_only])
   @@index([start_date, end_date])
   @@index([call_id])
+  // F1-02 / F1-11: jobs de SLA y retencion.
+  @@index([status, status_changed_at])
+  @@index([status, sla_notified_at])
+  @@index([retention_delete_at])
+  @@index([status, retention_delete_at])
 }
 
 model Project_User {
@@ -270,12 +318,41 @@ model ProjectDocument {
   file_size       Int?
   uploaded_at     DateTime    @default(now()) @db.Timestamp()
 
+  // F1-11 / BR-003: revision administrativa del documento. Solo `results`
+  // (informe final) y `ethics_approval` son revisables.
+  review_status DocumentReviewStatus @default(Pending)
+  reviewed_at   DateTime?            @db.Timestamp()
+  reviewed_by   String?
+  review_notes  String?              @db.Text
+
   project         Project     @relation(fields: [project_id], references: [project_id])
   // NUEVO: Relación inversa
   milestone       Milestone?  @relation(fields: [milestone_id], references: [milestone_id])
+  reviewer        User?       @relation("DocumentReviewer", fields: [reviewed_by], references: [id], onDelete: SetNull, onUpdate: Cascade)
 
   @@index([project_id])
   @@index([milestone_id])
+  @@index([project_id, doc_type, review_status])
+}
+
+/**
+ * F1-02 / RF-003: bitacora inmutable de cambios de estado del proyecto.
+ * Cada transicion guarda actor, estados y justificacion opcional.
+ */
+model Project_Status_Transition {
+  transition_id Int           @id @default(autoincrement())
+  project_id    Int
+  actor_id      String
+  from_status   ProjectStatus
+  to_status     ProjectStatus
+  justification String?       @db.Text
+  created_at    DateTime      @default(now()) @db.Timestamp()
+
+  project       Project       @relation(fields: [project_id], references: [project_id], onDelete: Cascade, onUpdate: Cascade)
+  actor         User          @relation("StatusTransitionActor", fields: [actor_id], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([project_id, created_at])
+  @@index([actor_id])
 }
 
 model Milestone {
@@ -427,4 +504,69 @@ model Archive_Alert {
 
   @@index([project_id, attempted_at])
   @@index([resolved_at])
+}
+
+// ==========================================
+// NOTIFICACIONES (RF-014)
+// Bandeja in-app por usuario + cola
+// persistente de correos con reintentos.
+// ==========================================
+
+enum NotificationType {
+  Decision
+  Milestone
+  Evidence
+  Archive
+  Role
+  Invitation
+  Deadline
+  System
+  // F1-02 / F1-11: alertas de SLA de revision y retencion de datos.
+  Retention
+  Sla
+}
+
+enum EmailStatus {
+  Pending
+  Sent
+  Failed
+  Skipped
+}
+
+model Notification {
+  notification_id Int              @id @default(autoincrement())
+  user_id         String
+  type            NotificationType
+  title           String           @db.VarChar(200)
+  message         String           @db.Text
+  // Ruta interna del frontend para abrir el recurso relacionado.
+  link            String?          @db.VarChar(500)
+  read_at         DateTime?        @db.Timestamp()
+  created_at      DateTime         @default(now()) @db.Timestamp()
+
+  user            User             @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  emails          Email_Outbox[]
+
+  @@index([user_id, read_at, created_at])
+  @@index([user_id, created_at])
+}
+
+model Email_Outbox {
+  email_id        Int              @id @default(autoincrement())
+  // La notificacion que origino el correo (null si se encola suelto).
+  notification_id Int?
+  recipient       String           @db.VarChar(320)
+  subject         String           @db.VarChar(300)
+  body            String           @db.Text
+  status          EmailStatus      @default(Pending)
+  attempts        Int              @default(0)
+  next_attempt_at DateTime         @default(now()) @db.Timestamp()
+  sent_at         DateTime?        @db.Timestamp()
+  error           String?          @db.Text
+  created_at      DateTime         @default(now()) @db.Timestamp()
+
+  notification    Notification?    @relation(fields: [notification_id], references: [notification_id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([status, next_attempt_at])
+  @@index([notification_id])
 }

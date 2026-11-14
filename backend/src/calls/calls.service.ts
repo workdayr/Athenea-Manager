@@ -141,6 +141,10 @@ export interface SubmitProposalData {
   startDate: Date;
   endDate: Date;
   callId: number;
+  researchInvolvesHumans?: boolean;
+  researchInvolvesAnimals?: boolean;
+  usesSensitiveData?: boolean;
+  isConfidential?: boolean;
 }
 
 /**
@@ -182,15 +186,44 @@ export function submitProposalToCall(
       },
       data.callId,
       new Date(),
-      () =>
-        tx.project.create({
+      async () => {
+        // RF-018: un PI no puede postular dos propuestas a la misma
+        // convocatoria. La validacion corre dentro de la transaccion y tras
+        // el SELECT ... FOR UPDATE, por lo que es segura bajo concurrencia.
+        const existing = await tx.project.count({
+          where: {
+            call_id: data.callId,
+            projectUsers: {
+              some: {
+                user_id: user.id,
+                project_role: 'Principal_Investigator',
+              },
+            },
+          },
+        });
+        if (existing > 0) {
+          fail(
+            CALL_ERROR_CODES.ALREADY_APPLIED,
+            'Ya tienes una postulacion registrada en esta convocatoria.',
+            409,
+            'callId',
+          );
+        }
+
+        return tx.project.create({
           data: {
             title: data.title.trim(),
             objectives: data.objectives.trim(),
             start_date: data.startDate,
             end_date: data.endDate,
             call_id: data.callId,
-            is_confidential: false,
+            is_confidential: data.isConfidential === true,
+            research_involves_humans: data.researchInvolvesHumans === true,
+            research_involves_animals: data.researchInvolvesAnimals === true,
+            uses_sensitive_data: data.usesSensitiveData === true,
+            // F1-02: el alta nace en Draft y pasa a Proposed al completar
+            // los 5 documentos obligatorios, igual que el alta directa.
+            status: 'Draft',
             projectUsers: {
               create: {
                 user_id: user.id,
@@ -209,7 +242,8 @@ export function submitProposalToCall(
             milestones: { select: { status: true } },
             expenses: { select: { amount: true } },
           },
-        }),
+        });
+      },
     );
   });
 }

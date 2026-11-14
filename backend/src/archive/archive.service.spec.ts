@@ -23,6 +23,12 @@ const { prismaMock, txMock } = vi.hoisted(() => {
     user: {
       findMany: vi.fn(),
     },
+    notification: {
+      create: vi.fn(),
+    },
+    email_Outbox: {
+      create: vi.fn(),
+    },
     $transaction: vi.fn(
       async (callback: (transaction: typeof tx) => unknown) => callback(tx),
     ),
@@ -72,8 +78,10 @@ beforeEach(() => {
   prismaMock.project.findMany.mockResolvedValue([{ project_id: 5 }]);
   prismaMock.archive_Alert.create.mockResolvedValue({ alert_id: 1 });
   prismaMock.user.findMany.mockResolvedValue([
-    { email: 'admin@unipolidgo.edu.mx' },
+    { id: 'admin-1', email: 'admin@unipolidgo.edu.mx' },
   ]);
+  prismaMock.notification.create.mockResolvedValue({ notification_id: 1 });
+  prismaMock.email_Outbox.create.mockResolvedValue({ email_id: 1 });
   prismaMock.$transaction.mockImplementation(
     async (callback: (transaction: typeof txMock) => unknown) => callback(txMock),
   );
@@ -173,8 +181,16 @@ describe('ProjectArchiveService (RF-020)', () => {
     });
     expect(prismaMock.user.findMany).toHaveBeenCalledWith({
       where: { role: 'ADMINISTRATOR' },
-      select: { email: true },
+      select: { id: true, email: true },
     });
+    // RF-014: la alerta se convierte en notificacion + correo encolado.
+    expect(prismaMock.notification.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        user_id: 'admin-1',
+        type: 'Archive',
+      }),
+    });
+    expect(prismaMock.email_Outbox.create).toHaveBeenCalled();
   });
 
   it('trata el conflicto de unicidad como archivado concurrente, sin alertar', async () => {

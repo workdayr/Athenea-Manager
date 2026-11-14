@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ROLES } from '../auth/roles.constants.js';
 import { prisma } from '../db/prisma.js';
 import { Prisma } from '../generated/prisma/client.js';
+import { notifyRole } from '../notifications/notifications.service.js';
 import {
   ARCHIVE_ALERT_MESSAGE_MAX_LENGTH,
   ARCHIVE_BATCH_SIZE,
@@ -306,20 +308,15 @@ export class ProjectArchiveService {
     }
 
     try {
-      const admins = await prisma.user.findMany({
-        where: { role: 'ADMINISTRATOR' },
-        select: { email: true },
+      const notified = await notifyRole(prisma, ROLES.ADMINISTRATOR, {
+        type: 'Archive',
+        title: 'Fallo de archivado de proyecto',
+        message: `No se pudo archivar ${target}: ${message}`,
+        link: '/dashboard',
       });
-      if (admins.length === 0) {
+      if (notified.length === 0) {
         this.logger.warn(
           'No hay administradores registrados para recibir la alerta.',
-        );
-        return;
-      }
-      for (const admin of admins) {
-        // Mismo patron que el resto de notificaciones del proyecto (RF-019).
-        console.log(
-          `[EMAIL MOCK] Alerta de archivado (RF-020) - ${target}: ${message} -> ${admin.email}`,
         );
       }
     } catch (notifyError) {

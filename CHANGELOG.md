@@ -100,33 +100,115 @@ documentos y paneles por rol.
 
 ## 2. No publicado
 
-Cambios posteriores a `0.9.0` (ninguno por ahora) y deudas conocidas detectadas
-al documentar el estado actual.
+Cambios posteriores a `0.9.0` (Fase 0 de saneamiento, 2026-11-12; Sprint 1
+de cierre de brechas, 2026-11-13; Sprint 2, 2026-11-14) y deudas conocidas
+detectadas al documentar el estado actual.
+
+### Añadido — Sprint 1 (2026-11-13)
+
+- **Notificaciones in-app (RF-014).** Bandeja personal persistida en
+  `Notification` con campana y panel en el frontend (sin página dedicada),
+  contador de no leídas, marcado individual/masivo y refresco cada 30 s.
+  Eventos cableados: decisión del comité, confirmación de hito, evidencia de
+  estudiante y alertas de archivado.
+- **Correo saliente con outbox persistente (RF-014).** Nodemailer sobre SMTP
+  configurable y tabla `Email_Outbox` con estados `Pending`, `Sent`, `Failed`
+  y `Skipped`. Un job periódico reintenta con backoff exponencial (máximo 5
+  intentos por defecto). Sin `SMTP_HOST` el sistema es fail-soft: guarda la
+  notificación y marca el correo como `Skipped`.
+- **Mailpit en Docker Compose.** SMTP local en `1025` y UI en `8025`; el
+  servicio `api` apunta a `mailpit` para probar correos sin relay externo.
+- **Sonda de salud (F1-08 / RNF-002).** `GET /health` y `GET /health/ready`
+  verifican proceso y PostgreSQL; responden `503` si la BD no está disponible.
+  El contenedor `api` usa `/health` como healthcheck.
+- **Consulta de auditoría (F1-08 / RF-017).** Query GraphQL `auditLog` con
+  filtros por actor, acción, objetivo y rango de fechas, paginación acotada y
+  acceso restringido a `ADMINISTRATOR` y `COORDINATOR`. La UI queda para un
+  sprint posterior.
+- **Toasts globales en el frontend.** `ToastProvider` en el layout raíz y
+  migración de login, registro, alta de proyecto, evaluación de propuestas,
+  conflictos y expediente documental.
+- **Migración `20261113000000_notifications`.** Crea los enums
+  `NotificationType`/`EmailStatus` y las tablas `Notification` y
+  `Email_Outbox` de forma idempotente.
+
+### Añadido — Sprint 2 (2026-11-14)
+
+- **Máquina de estados del proyecto (F1-02 / RF-003).** Matriz de
+  transiciones validada por rol, transición transaccional con `UPDATE`
+  condicionado por el estado de origen, bitácora inmutable
+  `Project_Status_Transition` y mutaciones GraphQL
+  `transitionProjectStatus` / query `projectStatusHistory`.
+  `Project.status_changed_at` y `Project.sla_notified_at` permiten que el job
+  diario avise a los administradores cuando un proyecto lleva más de 30 días
+  en `Under_Review` (tipo de notificación `Sla`).
+- **Reglas éticas y compuertas de aprobación (F1-11 / BR-006, BR-003).**
+  El alta declara `research_involves_humans`, `research_involves_animals` y
+  `uses_sensitive_data`. La aprobación del proyecto exige una
+  `ethics_approval` con `review_status = Approved`; completar el proyecto
+  exige el informe final (`results`) aprobado. Administración y Coordinación
+  revisan ambos documentos con `reviewProjectDocument`.
+- **Confidencialidad (BR-007).** `is_confidential` se declara en el alta, se
+  puede corregir desde `updateProjectSettings` y se aplica en la consulta
+  `project`, en el historial de estados y en los listados/reportes
+  institucionales (los roles no administradores solo ven proyectos
+  confidenciales de los que son equipo). La caché del dashboard incluye al
+  visor para no filtrar datos entre usuarios.
+- **Certificación de anonimización (BR-012).** El PI certifica por proyecto
+  que los datasets están anonimizados; la subida de XLSX en proyectos con
+  seres humanos se rechaza con `ANONYMIZATION_CERTIFICATION_REQUIRED` hasta
+  que exista la certificación.
+- **Retención segura (BR-013).** Al completar un proyecto con seres humanos
+  se calcula `retention_delete_at` (5 años por defecto). Un job diario avisa
+  30 días antes y, al vencer, borra archivos y filas operativas (documentos,
+  hitos, productos, gastos y equipo) en una transacción con bloqueo de fila,
+  conservando el proyecto, el historial de estados y la auditoría.
+- **Interfaz.** El alta incluye las declaraciones éticas y de
+  confidencialidad; el expediente muestra el estado de revisión, permite
+  aprobar/rechazar (`results` y `ethics_approval`) y certificar la
+  anonimización. La campana reconoce las notificaciones `Retention` y `Sla`.
+- **Migraciones `20261114000000_project_status_transitions` y
+  `20261114000001_ethics_and_retention`.** Idempotentes: añaden el historial,
+  el enum `DocumentReviewStatus`, las banderas éticas, la certificación, las
+  fechas de retención, los índices y los valores `Retention`/`Sla` del enum
+  `NotificationType`.
 
 ### Crítico / bloqueante
 
 - **Falta la migración Prisma de `0.9.0`.** `Draft`, `ProjectDocument.milestone_id`
   y la nueva FK `Milestone.assignee_id → user.id` solo existen en
-  `schema.prisma`; `backend/prisma/migrations/` sigue con 9 migraciones. Un
-  entorno nuevo queda desalineado y `prisma migrate deploy` no crea esos
-  cambios.
-- **`ProjectStatus` de GraphQL no incluye `Draft`.** `registerProject` crea el
-  proyecto en `Draft` y devuelve `ProjectGql`; graphql-js no puede serializar un
-  valor fuera del enum, así que la mutación responde con error (aunque la fila
-  se crea). Añadir `Draft` a `ProjectStatusGql` en `projects.model.ts` y
-  regenerar el esquema.
+  `schema.prisma`; ninguna migración los crea. Un entorno nuevo queda
+  desalineado y `prisma migrate deploy` no aplica esos cambios.
 - **Proyectos creados desde convocatoria no pueden subir documentos.**
   `submitProposalToCall` crea el proyecto sin `status`, por lo que toma el
   default `Proposed` del esquema; `uploadProjectDocument` exige `Draft`. Hay que
   definir el flujo: o la postulación nace en `Draft` y sube sus 5 PDF, o se
   permite cargar documentos en `Proposed`.
 
+### Corregido — Fase 0 de saneamiento (2026-11-12)
+
+- **`ANTIVIRUS_TIMEOUT_MS` cableado.** `AntivirusService` lee la variable de
+  entorno (con validación numérica y fallback de 30 000 ms) en lugar de usar
+  siempre `DEFAULT_TIMEOUT_MS`.
+- **BR-002 cuenta los proyectos en `Draft`.** `ACTIVE_PROJECT_STATUSES`
+  incluye `Draft`, por lo que un PI ya no puede acumular borradores sin
+  límite. Se añadió `OPEN_PROJECT_STATUSES` para que la carga de evidencia
+  siga bloqueada mientras el proyecto está en borrador.
+- **`projectMilestones` valida pertenencia.** Solo los miembros del proyecto,
+  `COORDINATOR` y `ADMINISTRATOR` pueden leer los hitos; el comité no ve la
+  ejecución. Los `STUDENT` siguen viendo únicamente sus tareas.
+- **Subida de evidencia de hitos transaccional.** El documento, el vínculo
+  `milestone_id` y la auditoría se escriben en un único
+  `prisma.$transaction`; ya no hay un `UPDATE` posterior que deje estados
+  inconsistentes.
+- **Postulación duplicada bloqueada.** Un PI no puede postular dos propuestas
+  a la misma convocatoria: la validación corre dentro de la transacción, tras
+  el `SELECT ... FOR UPDATE`, y responde `ALREADY_APPLIED`.
+- **Enum GraphQL `ProjectStatus` verificado.** `ProjectStatusGql` ya incluye
+  `Draft`; `registerProject` puede serializar el borrador sin error.
+
 ### Corregido / pendiente de corrección
 
-- **`ANTIVIRUS_TIMEOUT_MS` no está cableado.** Está documentado en
-  `backend/.env.example` (30 000 ms), pero `AntivirusService` usa la constante
-  `DEFAULT_TIMEOUT_MS` en lugar de leer la variable. Conectarlo o retirar la
-  variable del ejemplo.
 - **Datos demo en el dashboard (salvo hitos).** `dashboard/page.tsx` y
   `lib/dashboard.ts` incluyen `isDemo` / `isDemoIdentity`; desde `0.9.0` la
   sección de tareas usa hitos reales, pero los KPIs y el embudo siguen con datos
@@ -134,22 +216,10 @@ al documentar el estado actual.
 - **Convocatorias sin interfaz.** El backend está completo, pero no existe
   pantalla para crear, publicar, listar o postularse; la postulación solo se
   alcanza registrando un proyecto con `callId`.
-- **Posible postulación duplicada.** No hay restricción única
-  `(call_id, user_id)` en la base; hoy el freno es BR-002 (3 proyectos activos).
-  Confirmar con el SRS si un PI puede postular dos propuestas a la misma
-  convocatoria y, si no, agregar la restricción.
-- **BR-002 no cuenta los proyectos en `Draft`.** `ACTIVE_PROJECT_STATUSES` no
-  incluye el nuevo estado, así que un PI puede acumular borradores sin límite
-  mientras no suba los 5 documentos.
-- **`projectMilestones` no valida pertenencia.** Cualquier usuario autenticado
-  puede leer los hitos de cualquier `projectId`; solo los `STUDENT` quedan
-  filtrados por asignación. Añadir la validación de equipo/PI en el servicio o
-  en el resolver.
-- **Subida de evidencia de hitos sin transacción.** Son tres escrituras
-  secuenciales (subir, vincular, completar); un fallo intermedio deja estados
-  inconsistentes. Envolverlas en `prisma.$transaction`.
-- **La notificación de decisiones es un mock.** Solo hace `console.log`
-  (`[EMAIL MOCK]`); no hay correo ni notificación persistida.
+- **La notificación de decisiones ya no es un mock.** Desde el Sprint 1 se
+  persiste en `Notification` y se encola el correo en `Email_Outbox` dentro de
+  la misma transacción que la decisión. Las alertas de archivado también usan
+  el mismo mecanismo.
 - **Modelos sin lógica.** `Product`, `Expense` y `Document` (RAG) existen en
   `schema.prisma` pero no tienen servicio, resolver ni UI. `Milestone` ya tiene
   lógica desde `0.9.0`.
@@ -164,8 +234,6 @@ al documentar el estado actual.
   eliminó en `42480a54`, pero **sigue presente en el historial de git**. Cualquier
   secreto que haya estado ahí (URL de base de datos, `BETTER_AUTH_SECRET`,
   credenciales de Google) debe considerarse comprometido y rotarse.
-- **Lectura de hitos sin control de pertenencia** (ver arriba): es una fuga de
-  información entre proyectos, no solo un detalle funcional.
 - Revisar `frontend/public/*.svg` heredados de `create-next-app` antes de publicar
   el sitio (no es un riesgo, pero es contenido de plantilla sin uso).
 
@@ -1043,7 +1111,7 @@ Runner: **Vitest 4** (`pnpm test`, `pnpm test:cov`). Cobertura con
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | No | Sin ellas, Google OAuth no se registra |
 | `AUTHORIZED_EMAIL_DOMAINS` | No | Dominios externos extra, separados por coma |
 | `CLAMAV_HOST` / `CLAMAV_PORT` | No | Default `localhost:3310`; en Compose `clamav:3310` |
-| `ANTIVIRUS_TIMEOUT_MS` | No | Documentada (30 000) pero **aún no cableada** |
+| `ANTIVIRUS_TIMEOUT_MS` | No | Timeout del socket ClamAV en ms; default `30000` |
 | `UPLOAD_DIR` | No | Default `<cwd>/uploads` |
 
 ### Frontend
@@ -1121,11 +1189,7 @@ docker compose up --build
 | Prioridad | Tema | Requisito |
 | --- | --- | --- |
 | Alta | Generar y aplicar la migración de US 5.2 (`Draft`, `milestone_id`, FK `assignee_id`) | US 5.2 |
-| Alta | Añadir `Draft` al enum `ProjectStatus` de GraphQL | RF-002 |
-| Alta | Validar pertenencia al proyecto en `projectMilestones` | RF-001, US 5.2 |
-| Alta | Cablear `ANTIVIRUS_TIMEOUT_MS` | RF-016 |
 | Alta | Conectar dashboard a datos reales (KPIs y embudo) | RF-008 |
-| Media | Hacer transaccional la subida de evidencia de hitos | US 5.2 |
 | Media | Resolver el flujo `Draft`/`Proposed` para proyectos creados por convocatoria | RF-002, RF-018 |
 | Media | UI de convocatorias (hoy solo backend) | RF-018 |
 | Media | Versionado e historial de propuestas | RF-004 |

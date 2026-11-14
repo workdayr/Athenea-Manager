@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, type FormEvent } from 'react';
+import { useToast } from '@/components/ui/toast-provider';
 import { authClient } from '@/lib/auth-client';
 import { mapAuthError, mapOAuthCallbackError } from '@/lib/auth-errors';
 
@@ -25,11 +26,11 @@ export function RegisterForm({
   initialOAuthError: string | null;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   // Descarta el banner de ?error= cuando el usuario interactua.
@@ -39,7 +40,7 @@ export function RegisterForm({
   // usuario. Al no guardarlo en state, las navegaciones client-side que
   // cambien ?error= tambien se reflejan.
   const oauthError = dismissed ? null : initialOAuthError;
-  const displayError = error ?? mapOAuthCallbackError(oauthError);
+  const displayError = mapOAuthCallbackError(oauthError);
 
   // El callback OAuth redirige aqui con ?error=... cuando algo falla.
   // Solo limpia la URL (sistema externo); el mensaje ya llego por props.
@@ -51,24 +52,23 @@ export function RegisterForm({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
     setDismissed(true);
     if (name.trim().length === 0) {
-      setError('Ingresa tu nombre completo.');
+      toast.error('Ingresa tu nombre completo.');
       return;
     }
     if (!email.trim().toLowerCase().endsWith(INSTITUTIONAL_DOMAIN)) {
-      setError(
+      toast.error(
         `Solo se aceptan correos institucionales ${INSTITUTIONAL_DOMAIN}.`,
       );
       return;
     }
     if (password.length < 8 || password.length > 64) {
-      setError('La contraseña debe tener entre 8 y 64 caracteres.');
+      toast.error('La contraseña debe tener entre 8 y 64 caracteres.');
       return;
     }
     if (password !== confirmPassword) {
-      setError('Las contraseñas no coinciden.');
+      toast.error('Las contraseñas no coinciden.');
       return;
     }
     setLoading(true);
@@ -79,19 +79,20 @@ export function RegisterForm({
     });
     setLoading(false);
     if (signUpError) {
-      setError(
+      toast.error(
         mapAuthError(
           signUpError,
           'No fue posible crear la cuenta. Intenta de nuevo.',
         ),
+        'No se pudo crear la cuenta',
       );
       return;
     }
+    toast.success('Cuenta creada. Redirigiendo al panel…');
     router.push('/dashboard');
   }
 
   async function handleGoogleSignUp() {
-    setError(null);
     setDismissed(true);
     setGoogleLoading(true);
     // RF-015: registro (o login, si el email ya existe) con Google
@@ -105,11 +106,12 @@ export function RegisterForm({
     });
     setGoogleLoading(false);
     if (socialError) {
-      setError(
+      toast.error(
         mapAuthError(
           socialError,
           'El registro con Google no está disponible por el momento. Usa el formulario.',
         ),
+        'No se pudo continuar con Google',
       );
     }
     // Sin error el cliente redirige solo a Google.

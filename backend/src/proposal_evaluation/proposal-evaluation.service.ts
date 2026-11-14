@@ -1,10 +1,15 @@
 import { prisma } from '../db/prisma.js';
+import { notifyUser } from '../notifications/notifications.service.js';
+import { isTransitionAllowed } from '../projects/project-lifecycle.policy.js';
+import {
+  applyStatusTransition,
+  assertTransitionConditions,
+} from '../projects/project-lifecycle.service.js';
 import { getProjectWithTeamForEvaluation } from '../projects/projects.service.js';
 import type { AuthenticatedUser } from '../projects/session.guard.js';
 import type {
   ConflictStatus,
   EvaluationDecision,
-  ProjectStatus,
 } from '../generated/prisma/client.js';
 import {
   EVALUABLE_STATUSES,
@@ -102,6 +107,9 @@ interface ProjectRow {
   start_date: Date;
   end_date: Date;
   status: string;
+  research_involves_humans: boolean;
+  research_involves_animals: boolean;
+  uses_sensitive_data: boolean;
   projectUsers: TeamRow[];
 }
 
@@ -367,6 +375,18 @@ const row = (await getProjectWithTeamForEvaluation(data.projectId)) as unknown a
   const to = statusAfterDecision(
     data.decision as (typeof EVALUATION_DECISIONS)[number],
   );
+
+  // F1-02: la decision debe ser una transicion valida de la maquina de
+  // estados y cumplir las compuertas BR-006 (etica) antes de registrarse.
+  if (!isTransitionAllowed(from, to)) {
+    fail(
+      EVALUATION_ERROR_CODES.INVALID_STATE,
+      `La decision no puede aplicarse desde el estado ${from} (RF-003).`,
+      409,
+    );
+  }
+  await assertTransitionConditions(row, to);
+
   return prisma.$transaction(async (tx) => {
     const evaluation = await tx.proposal_Evaluation.create({
       data: {
@@ -376,11 +396,36 @@ const row = (await getProjectWithTeamForEvaluation(data.projectId)) as unknown a
         justification: data.justification.trim(),
       },
     });
-    await tx.project.update({
-      where: { project_id: data.projectId },
-      data: { status: to as ProjectStatus },
+    // F1-02: el historial y el SLA se actualizan en la misma transaccion.
+    const applied = await applyStatusTransition(tx, {
+      projectId: data.projectId,
+      actorId: viewer.id,
+      from,
+      to,
+      justification: data.justification,
     });
-    console.log(`[EMAIL MOCK] Notificando al PI que el proyecto ${data.projectId} ha sido evaluado como: ${data.decision}`);
+    if (!applied.applied) {
+      fail(
+        EVALUATION_ERROR_CODES.INVALID_STATE,
+        'El proyecto cambio de estado durante la operacion. Recarga e intenta de nuevo.',
+        409,
+      );
+    }
+    // RF-014: la notificacion y su correo entran en la misma transaccion
+    // que la decision. El job de outbox los envia despues.
+    const pi = row.projectUsers.find(
+      (member) => member.project_role === 'Principal_Investigator',
+    );
+    if (pi) {
+      await notifyUser(tx, pi.user_id, {
+        type: 'Decision',
+        title: 'Decision del comite evaluador',
+        message:
+          `Tu proyecto "${row.title}" fue evaluado con la decision ` +
+          `${data.decision}. Nuevo estado: ${to}.`,
+        link: `/projects/${data.projectId}/documents`,
+      });
+    }
     await tx.audit_Log.create({
       data: {
         actor_id: viewer.id,

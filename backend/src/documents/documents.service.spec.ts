@@ -94,6 +94,7 @@ describe('setDocumentVisibility (US 4.1 / RF-005)', () => {
     expect(prisma.projectDocument.update).toHaveBeenCalledWith({
       where: { document_id: 55 },
       data: { visibility: 'Shared_with_administration' },
+      include: { reviewer: { select: { name: true } } },
     });
     expect(prisma.audit_Log.create).toHaveBeenCalledWith({
       data: {
@@ -216,6 +217,7 @@ describe('listProjectDocuments (US 4.1 / RF-005)', () => {
     expect(prisma.projectDocument.findMany).toHaveBeenCalledWith({
       where: { project_id: 10 },
       orderBy: { uploaded_at: 'desc' },
+      include: { reviewer: { select: { name: true } } },
     });
     expect(result[0]?.can_change_visibility).toBe(false); // obligatorio
     expect(result[1]?.can_change_visibility).toBe(true); // evidencia
@@ -232,6 +234,7 @@ describe('listProjectDocuments (US 4.1 / RF-005)', () => {
     expect(prisma.projectDocument.findMany).toHaveBeenCalledWith({
       where: { project_id: 10, visibility: 'Shared_with_administration' },
       orderBy: { uploaded_at: 'desc' },
+      include: { reviewer: { select: { name: true } } },
     });
     expect(result[0]?.can_change_visibility).toBe(false);
     expect(result[0]).not.toHaveProperty('file_url');

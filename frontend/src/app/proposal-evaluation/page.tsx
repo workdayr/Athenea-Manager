@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { useToast } from '@/components/ui/toast-provider';
 import { authClient } from '@/lib/auth-client';
 import {
   getApolloClient,
@@ -22,10 +23,10 @@ const ALLOWED_ROLES = ['COMMITTEE', 'COORDINATOR'];
  */
 export default function ProposalEvaluationListPage() {
   const router = useRouter();
+  const toast = useToast();
   const [checking, setChecking] = useState(true);
   const [denied, setDenied] = useState(false);
   const [proposals, setProposals] = useState<ProposalSummary[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -57,10 +58,11 @@ export default function ProposalEvaluationListPage() {
         .catch((queryError: unknown) => {
           if (active) {
             const code = graphqlErrorCode(queryError);
-            setError(
+            toast.error(
               code === 'FORBIDDEN'
                 ? 'No tienes permisos para ver esta lista.'
                 : 'No fue posible cargar las propuestas. Intenta de nuevo.',
+              'No se pudo cargar la lista',
             );
           }
         });
@@ -68,7 +70,7 @@ export default function ProposalEvaluationListPage() {
     return () => {
       active = false;
     };
-  }, [router]);
+  }, [router, toast]);
 
   if (checking) {
     return (
@@ -102,16 +104,7 @@ export default function ProposalEvaluationListPage() {
           Propuestas pendientes de revisión
         </h1>
 
-        {error && (
-          <p
-            role="alert"
-            className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
-          >
-            {error}
-          </p>
-        )}
-
-        {proposals !== null && proposals.length === 0 && !error && (
+        {proposals !== null && proposals.length === 0 && (
           <p className="mt-4 rounded-md border border-gray-200 bg-white px-3 py-4 text-sm text-gray-600">
             No hay propuestas en estado Propuesto o En revisión.
           </p>

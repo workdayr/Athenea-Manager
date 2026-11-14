@@ -147,13 +147,24 @@ function envPort(value: string | undefined, fallback: number): number {
     : fallback;
 }
 
+/** Lee un timeout valido (ms) de entorno o usa el valor por defecto. */
+function envTimeoutMs(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 /**
- * Instancia por defecto. El host/puerto se toman de `CLAMAV_HOST` /
- * `CLAMAV_PORT` (documentados en `.env.example`); en Docker Compose el
- * backend debe apuntar al servicio `clamav` (`CLAMAV_HOST=clamav`), porque
- * `localhost` dentro del contenedor no es el daemon.
+ * Instancia por defecto. El host/puerto/timeout se toman de `CLAMAV_HOST`,
+ * `CLAMAV_PORT` y `ANTIVIRUS_TIMEOUT_MS` (documentados en `.env.example`);
+ * en Docker Compose el backend debe apuntar al servicio `clamav`
+ * (`CLAMAV_HOST=clamav`), porque `localhost` dentro del contenedor no es el
+ * daemon.
  */
 export const antivirus = new AntivirusService({
   host: process.env['CLAMAV_HOST'] || DEFAULT_CLAMAV_HOST,
   port: envPort(process.env['CLAMAV_PORT'], DEFAULT_CLAMAV_PORT),
+  timeoutMs: envTimeoutMs(
+    process.env['ANTIVIRUS_TIMEOUT_MS'],
+    DEFAULT_TIMEOUT_MS,
+  ),
 });

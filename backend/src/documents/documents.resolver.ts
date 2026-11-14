@@ -18,6 +18,7 @@ import {
   type AuthenticatedUser,
 } from '../projects/session.guard.js';
 import {
+  DocumentReviewStatusGql,
   DocumentVisibilityGql,
   ProjectDocumentGql,
 } from './documents.model.js';
@@ -28,7 +29,7 @@ import {
   type ProjectDocumentView,
 } from './documents.service.js';
 
-function toGql(row: ProjectDocumentView): ProjectDocumentGql {
+export function toDocumentGql(row: ProjectDocumentView): ProjectDocumentGql {
   const document = new ProjectDocumentGql();
   document.documentId = row.document_id;
   document.projectId = row.project_id;
@@ -40,6 +41,11 @@ function toGql(row: ProjectDocumentView): ProjectDocumentGql {
   document.uploadedAt = row.uploaded_at;
   document.mandatoryReview = row.mandatory_review;
   document.canChangeVisibility = row.can_change_visibility;
+  document.reviewStatus = row.review_status as DocumentReviewStatusGql;
+  document.reviewedAt = row.reviewed_at;
+  document.reviewerName = row.reviewer_name;
+  document.reviewNotes = row.review_notes;
+  document.canReview = row.can_review;
   return document;
 }
 
@@ -76,7 +82,7 @@ export class DocumentsResolver {
     @Context() context: { req?: { ip?: string } },
   ): Promise<ProjectDocumentGql> {
     try {
-      return toGql(
+      return toDocumentGql(
         await setDocumentVisibility(
           user,
           projectId,
@@ -97,7 +103,7 @@ export class DocumentsResolver {
   ): Promise<ProjectDocumentGql[]> {
     try {
       const rows = await listProjectDocuments(user, projectId);
-      return rows.map(toGql);
+      return rows.map(toDocumentGql);
     } catch (error) {
       toGraphQLError(error);
     }

@@ -224,6 +224,13 @@ const { prismaMock } = vi.hoisted(() => {
     if (!where) {
       return true;
     }
+    // BR-007: los listados combinan la visibilidad con `AND` para no pisar
+    // el `OR` de la busqueda por titulo/PI.
+    if (Array.isArray(where.AND)) {
+      if (!where.AND.every((clause: any) => matchesProject(project, clause))) {
+        return false;
+      }
+    }
     if (
       where.start_date?.lte &&
       project.start_date.getTime() > where.start_date.lte.getTime()

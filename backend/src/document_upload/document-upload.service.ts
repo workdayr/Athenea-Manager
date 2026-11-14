@@ -4,7 +4,7 @@ import { prisma } from '../db/prisma.js';
 import type { DocType } from '../generated/prisma/client.js';
 import type { AuthenticatedUser } from '../projects/session.guard.js';
 import {
-  ACTIVE_PROJECT_STATUSES,
+  OPEN_PROJECT_STATUSES,
 } from '../projects/projects.constants.js';
 import { assertProjectWritable } from '../projects/project-write-guard.js';
 import {
@@ -15,8 +15,10 @@ import {
 import {
   checkProjectQuota,
   detectFileType,
+  extractFileExtension,
   validateEvidenceUpload,
 } from './document-upload.policy.js';
+import { requiresAnonymizationCertification } from '../projects/project-ethics.policy.js';
 import { antivirus } from './antivirus.service.js';
 
 /** Error de dominio: se mapea a HTTP (DocumentsController) o GraphQL. */
@@ -35,6 +37,11 @@ export interface UploadedFile {
   buffer: Buffer;
   originalname: string;
   size: number;
+}
+
+export interface UploadEvidenceOptions {
+  /** RF-006: vincula la evidencia a un hito en la misma transaccion. */
+  milestoneId?: number;
 }
 
 export interface UploadEvidenceResult {
@@ -72,8 +79,9 @@ function fail(
  * 3. Validacion por Magic Numbers + extension + 25 MB.
  * 4. Cuota de 500 MB por proyecto.
  * 5. Escaneo antivirus (clamd). Si infectado o no disponible -> 422/503.
- * 6. Escribe en UPLOAD_DIR y crea ProjectDocument (evidence, Team_only).
- * 7. Registra en Audit_Log (RF-017).
+ * 6. Escribe en UPLOAD_DIR y, en una transaccion, crea ProjectDocument
+ *    (evidence, Team_only), lo vincula al hito si aplica y registra la
+ *    auditoria (RF-017). Si el INSERT falla, se borra el archivo.
  *
  * Solo miembros del equipo pueden subir (no requiere ser PI, a diferencia
  * de los documentos obligatorios en projects.service.ts).
@@ -83,6 +91,7 @@ export async function uploadEvidenceDocument(
   projectId: number,
   file: UploadedFile,
   ip: string,
+  options: UploadEvidenceOptions = {},
 ): Promise<UploadEvidenceResult> {
   // 1) Membresia en el equipo (defensa en profundidad: el controller no usa @Roles).
   const membership = await prisma.project_User.findFirst({
@@ -109,7 +118,7 @@ export async function uploadEvidenceDocument(
   // RF-020: un proyecto archivado no admite nuevas evidencias.
   assertProjectWritable(project as { is_read_only?: boolean | null });
   if (
-    !(ACTIVE_PROJECT_STATUSES as readonly string[]).includes(
+    !(OPEN_PROJECT_STATUSES as readonly string[]).includes(
       (project as { status: string }).status,
     )
   ) {
@@ -117,6 +126,31 @@ export async function uploadEvidenceDocument(
       DOCUMENT_ERROR_CODES.CONFLICT,
       'El proyecto esta cerrado y no acepta documentos.',
       409,
+    );
+  }
+
+  // 2b) F1-11 / BR-012: los datasets XLSX de proyectos con seres humanos
+  // exigen que el PI haya certificado su anonimizacion.
+  const extension = extractFileExtension(file.originalname);
+  if (
+    extension &&
+    requiresAnonymizationCertification(
+      project as {
+        research_involves_humans: boolean;
+        research_involves_animals: boolean;
+        uses_sensitive_data: boolean;
+        anonymization_certified: boolean;
+      },
+      extension,
+    )
+  ) {
+    fail(
+      DOCUMENT_ERROR_CODES.ANONYMIZATION_CERTIFICATION_REQUIRED,
+      documentErrorMessage(
+        DOCUMENT_ERROR_CODES.ANONYMIZATION_CERTIFICATION_REQUIRED,
+      ),
+      409,
+      'file',
     );
   }
 
@@ -178,27 +212,36 @@ export async function uploadEvidenceDocument(
   await writeFile(absolutePath, file.buffer);
 
   try {
-    const created = (await prisma.projectDocument.create({
-      data: {
-        project_id: projectId,
-        doc_type: 'evidence' as DocType,
-        visibility: 'Team_only',
-        file_url: absolutePath.split(sep).join('/'),
-        version: 1,
-        file_name: file.originalname,
-        file_size: file.size,
-      },
-    })) as unknown as UploadEvidenceResult;
+    // 6-7) Documento + vinculo al hito + auditoria en una sola transaccion:
+    // un fallo intermedio revierte todo y no deja estados inconsistentes.
+    const created = (await prisma.$transaction(async (tx) => {
+      const document = await tx.projectDocument.create({
+        data: {
+          project_id: projectId,
+          doc_type: 'evidence' as DocType,
+          visibility: 'Team_only',
+          file_url: absolutePath.split(sep).join('/'),
+          version: 1,
+          file_name: file.originalname,
+          file_size: file.size,
+          ...(options.milestoneId !== undefined
+            ? { milestone_id: options.milestoneId }
+            : {}),
+        },
+      });
 
-    // 7) Auditoria (RF-017).
-    await prisma.audit_Log.create({
-      data: {
-        actor_id: user.id,
-        action: evidenceUploadAuditAction(detected),
-        target_id: String(projectId),
-        source_ip: ip,
-      },
-    });
+      // 7) Auditoria (RF-017).
+      await tx.audit_Log.create({
+        data: {
+          actor_id: user.id,
+          action: evidenceUploadAuditAction(detected),
+          target_id: String(projectId),
+          source_ip: ip,
+        },
+      });
+
+      return document;
+    })) as unknown as UploadEvidenceResult;
 
     return {
       document_id: created.document_id,

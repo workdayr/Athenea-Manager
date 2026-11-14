@@ -37,6 +37,8 @@ export const DOCUMENT_ERROR_CODES = {
   CONFLICT: 'CONFLICT',
   /** RF-020: el proyecto esta archivado en solo lectura. */
   PROJECT_READ_ONLY: 'PROJECT_READ_ONLY',
+  /** F1-11 / BR-012: falta certificar la anonimizacion del dataset. */
+  ANONYMIZATION_CERTIFICATION_REQUIRED: 'ANONYMIZATION_CERTIFICATION_REQUIRED',
 } as const;
 
 /** Accion de auditoria al subir un documento de evidencia (RF-017). */
@@ -59,6 +61,8 @@ export function documentErrorMessage(code: string): string {
       return 'Ya existe un documento de evidencia con este nombre para el proyecto.';
     case DOCUMENT_ERROR_CODES.PROJECT_READ_ONLY:
       return 'El proyecto esta archivado en modo solo lectura (RF-020).';
+    case DOCUMENT_ERROR_CODES.ANONYMIZATION_CERTIFICATION_REQUIRED:
+      return 'El proyecto involucra seres humanos y aun no certifica la anonimizacion de sus datasets (BR-012).';
     default:
       return 'Error de validacion del archivo.';
   }

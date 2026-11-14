@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useState, type ReactNode } from 'react';
+import { NotificationBell } from '@/components/notifications/notification-bell';
 import { Icon } from './icons';
 import {
   ROLE_LABELS,
@@ -91,14 +92,7 @@ export function AppShell({
               <Icon name="chevronDown" className="h-3.5 w-3.5 text-muted" />
             </div>
 
-            <button
-              type="button"
-              className="relative grid h-9 w-9 place-items-center rounded-lg border border-line text-muted transition hover:text-ink"
-              aria-label="Notificaciones"
-            >
-              <Icon name="bell" className="h-4 w-4" />
-              <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-red-500 ring-2 ring-white" />
-            </button>
+            <NotificationBell />
 
             <div className="flex items-center gap-2.5 border-l border-line pl-2 sm:pl-3">
               <span className="grid h-9 w-9 place-items-center rounded-full bg-gradient-to-br from-brand-600 to-brand-400 text-xs font-semibold text-white">

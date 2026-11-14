@@ -144,6 +144,24 @@ describe('AntivirusService (clamd INSTREAM)', () => {
     vi.unstubAllEnvs();
   });
 
+  it('usa ANTIVIRUS_TIMEOUT_MS del entorno para la instancia por defecto', async () => {
+    vi.stubEnv('ANTIVIRUS_TIMEOUT_MS', '4500');
+    vi.resetModules();
+    const { antivirus } = await import('./antivirus.service.js');
+    const instance = antivirus as unknown as { timeoutMs: number };
+    expect(instance.timeoutMs).toBe(4500);
+    vi.unstubAllEnvs();
+  });
+
+  it('ignora un ANTIVIRUS_TIMEOUT_MS invalido y conserva el valor por defecto', async () => {
+    vi.stubEnv('ANTIVIRUS_TIMEOUT_MS', 'no-es-un-timeout');
+    vi.resetModules();
+    const { antivirus } = await import('./antivirus.service.js');
+    const instance = antivirus as unknown as { timeoutMs: number };
+    expect(instance.timeoutMs).toBe(30_000);
+    vi.unstubAllEnvs();
+  });
+
   it('devuelve infected para un archivo con firma de virus', async () => {
     const socket = fakeClamdSocket(
       'stream: test.file: Eicar-Test-Signature FOUND',

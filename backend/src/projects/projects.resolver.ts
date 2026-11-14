@@ -1,5 +1,12 @@
 import { UseGuards } from '@nestjs/common';
-import { Args, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
+import {
+  Args,
+  Context,
+  Int,
+  Mutation,
+  Query,
+  Resolver,
+} from '@nestjs/graphql';
 import { GraphQLError } from 'graphql';
 import { ROLES } from '../auth/roles.constants.js';
 import { Roles } from '../auth/roles.decorator.js';
@@ -8,15 +15,33 @@ import { CurrentUser } from './current-user.decorator.js';
 import {
   ProjectGql,
   RegisterProjectInput,
+  UpdateProjectSettingsInput,
 } from './projects.model.js';
 import { toProjectGql, type ProjectRow } from './projects.mapper.js';
 import {
   activeProjectCount,
+  getProjectForViewer,
   myProjects,
   ProjectError,
   registerProject,
+  updateProjectSettings,
 } from './projects.service.js';
 import { SessionGuard, type AuthenticatedUser } from './session.guard.js';
+
+interface GraphQLContext {
+  req?: {
+    ip?: string;
+    headers?: Record<string, string | string[] | undefined>;
+  };
+}
+
+function requestIp(ctx: GraphQLContext): string {
+  const forwarded = ctx.req?.headers?.['x-forwarded-for'];
+  const first = Array.isArray(forwarded)
+    ? forwarded[0]
+    : forwarded?.split(',')[0]?.trim();
+  return ctx.req?.ip ?? first ?? 'unknown';
+}
 
 function toGraphQLError(error: unknown): never {
   if (error instanceof ProjectError) {
@@ -63,6 +88,10 @@ export class ProjectsResolver {
         startDate: input.startDate,
         endDate: input.endDate,
         callId: input.callId,
+        researchInvolvesHumans: input.researchInvolvesHumans,
+        researchInvolvesAnimals: input.researchInvolvesAnimals,
+        usesSensitiveData: input.usesSensitiveData,
+        isConfidential: input.isConfidential,
       })) as unknown as ProjectRow;
       return toProjectGql(row, user);
     } catch (error) {
@@ -76,6 +105,50 @@ export class ProjectsResolver {
   ): Promise<ProjectGql[]> {
     const rows = (await myProjects(user)) as unknown as ProjectRow[];
     return rows.map((row) => toProjectGql(row, user));
+  }
+
+  /** BR-007: detalle del proyecto con control de confidencialidad. */
+  @Query(() => ProjectGql)
+  async project(
+    @Args('projectId', { type: () => Int }) projectId: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<ProjectGql> {
+    try {
+      const row = (await getProjectForViewer(
+        user,
+        projectId,
+      )) as unknown as ProjectRow;
+      return toProjectGql(row, user);
+    } catch (error) {
+      toGraphQLError(error);
+    }
+  }
+
+  /** F1-11: el PI ajusta confidencialidad y banderas de investigacion. */
+  @Mutation(() => ProjectGql)
+  @Roles(ROLES.PRINCIPAL_INVESTIGATOR)
+  async updateProjectSettings(
+    @Args('projectId', { type: () => Int }) projectId: number,
+    @Args('input') input: UpdateProjectSettingsInput,
+    @CurrentUser() user: AuthenticatedUser,
+    @Context() ctx: GraphQLContext,
+  ): Promise<ProjectGql> {
+    try {
+      const row = (await updateProjectSettings(
+        user,
+        projectId,
+        {
+          isConfidential: input.isConfidential,
+          researchInvolvesHumans: input.researchInvolvesHumans,
+          researchInvolvesAnimals: input.researchInvolvesAnimals,
+          usesSensitiveData: input.usesSensitiveData,
+        },
+        requestIp(ctx),
+      )) as unknown as ProjectRow;
+      return toProjectGql(row, user);
+    } catch (error) {
+      toGraphQLError(error);
+    }
   }
 
   /** Cupo del PI para el banner "N de 3 activos" (BR-002). */
