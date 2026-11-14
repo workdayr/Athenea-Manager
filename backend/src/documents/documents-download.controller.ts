@@ -6,7 +6,6 @@ import {
   Param,
   ParseIntPipe,
   Query,
-  Req,
   Res,
   UseGuards,
 } from '@nestjs/common';
@@ -21,11 +20,6 @@ import {
   verifyDownloadToken,
 } from './document-token.service.js';
 import { isInstitutionalRole } from './documents.policy.js';
-
-interface RequestWithIp {
-  ip?: string;
-  headers?: Record<string, string | string[] | undefined>;
-}
 
 @Controller('documents')
 export class DocumentsDownloadController {

@@ -343,13 +343,13 @@ conocidas detectadas al documentar el estado actual.
   diario BR-008 (retrasos y avisos idempotentes 30/15/5).
   La suite completa queda en **376 casos (53 archivos)**.
 
-### Crítico / bloqueante
+### Corregido — flujo de convocatoria (2026-11-16)
 
-- **Proyectos creados desde convocatoria no pueden subir documentos.**
-  `submitProposalToCall` crea el proyecto sin `status`, por lo que toma el
-  default `Proposed` del esquema; `uploadProjectDocument` exige `Draft`. Hay que
-  definir el flujo: o la postulación nace en `Draft` y sube sus 5 PDF, o se
-  permite cargar documentos en `Proposed`.
+- **Proyectos creados desde convocatoria ahora nacen en `Draft`.**
+  `submitProposalToCall` fija `status: 'Draft'`, igual que el alta directa, por
+  lo que `uploadProjectDocument` acepta los 5 PDF obligatorios y la
+  auto-transicion `Draft -> Proposed` aplica. La nota anterior ("Crítico /
+  bloqueante") queda obsoleta.
 
 ### Corregido — Fase 0 de saneamiento (2026-11-12)
 

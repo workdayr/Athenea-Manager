@@ -2,14 +2,10 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import { ROLES } from '../auth/roles.constants.js';
 import { prisma } from '../db/prisma.js';
-import type { DocType, ProjectStatus } from '../generated/prisma/client.js';
+import type { DocType } from '../generated/prisma/client.js';
 import { notifyRole } from '../notifications/notifications.service.js';
 import { applyStatusTransition } from '../projects/project-lifecycle.service.js';
-import {
-  MAX_FILE_BYTES,
-  PROJECT_QUOTA_BYTES,
-  REQUIRED_DOCUMENT_TYPES,
-} from '../projects/projects.constants.js';
+import { MAX_FILE_BYTES } from '../projects/projects.constants.js';
 import {
   exceedsProjectQuota,
   validatePdfUpload,
