@@ -48,6 +48,15 @@ export default function ProjectDocumentsPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  // AIR-003: cuando se llega desde una cita del asistente, el enlace
+  // incluye #document-<id>; se resalta la fila correspondiente.
+  const [highlightedDocumentId] = useState<number | null>(() => {
+    if (typeof window === 'undefined') {
+      return null;
+    }
+    const match = /^#document-(\d+)$/.exec(window.location.hash);
+    return match ? Number(match[1]) : null;
+  });
 
   useEffect(() => {
     let active = true;
@@ -112,6 +121,17 @@ export default function ProjectDocumentsPage() {
       active = false;
     };
   }, [checking, projectId, validProjectId]);
+
+  // El ancla se resuelve cuando los documentos ya estan en el DOM.
+  useEffect(() => {
+    if (!highlightedDocumentId || loadingDocuments || documentsError) {
+      return;
+    }
+    const target = document.getElementById(
+      `document-${highlightedDocumentId}`,
+    );
+    target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [highlightedDocumentId, loadingDocuments, documentsError, documents]);
 
   async function handleVisibilityChange(
     documentId: number,
@@ -269,6 +289,7 @@ export default function ProjectDocumentsPage() {
                         document={document}
                         isPrincipalInvestigator={isPrincipalInvestigator}
                         updating={updatingId === document.documentId}
+                        highlighted={highlightedDocumentId === document.documentId}
                         onChangeVisibility={handleVisibilityChange}
                       />
                     ))}
@@ -346,11 +367,13 @@ function DocumentTableRow({
   document,
   isPrincipalInvestigator,
   updating,
+  highlighted,
   onChangeVisibility,
 }: {
   document: ProjectDocument;
   isPrincipalInvestigator: boolean;
   updating: boolean;
+  highlighted: boolean;
   onChangeVisibility: (
     documentId: number,
     visibility: DocumentVisibility,
@@ -363,13 +386,23 @@ function DocumentTableRow({
       : 'Solo el Investigador Principal puede cambiar la visibilidad.';
 
   return (
-    <tr className="border-b border-gray-100 align-middle hover:bg-gray-50/70">
+    <tr
+      id={`document-${document.documentId}`}
+      className={`scroll-mt-24 border-b border-gray-100 align-middle hover:bg-gray-50/70 ${
+        highlighted ? 'bg-blue-50/70' : ''
+      }`}
+    >
       <td className="px-6 py-3">
         <span className="block truncate text-sm font-medium text-gray-900">
           {document.fileName ?? `Documento #${document.documentId}`}
         </span>
         <span className="block text-xs text-gray-500">
           v{document.version}
+          {highlighted && (
+            <span className="ml-2 inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
+              Citado por el asistente
+            </span>
+          )}
           {document.mandatoryReview && (
             <span className="ml-2 inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
               Revisión obligatoria
