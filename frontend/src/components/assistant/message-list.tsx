@@ -2,6 +2,9 @@ import type { AssistantMessage } from '@/lib/assistant';
 import { AssistantAvatar } from './assistant-avatar';
 import { MessageBubble } from './message-bubble';
 
+/** Entrada de cada mensaje con entrada animada y respeto al reduced motion. */
+const MESSAGE_CLASS = 'animate-fade-up';
+
 export function MessageList({
   messages,
   pending,
@@ -24,13 +27,14 @@ export function MessageList({
       className="mx-auto w-full max-w-3xl space-y-6 px-4 py-6 lg:px-6"
     >
       {messages.map((message) => (
-        <MessageBubble
-          key={message.id}
-          message={message}
-          highlight={highlight}
-          onCitationClick={onCitationClick}
-          onSelectPrompt={onSelectPrompt}
-        />
+        <div key={message.id} className={MESSAGE_CLASS}>
+          <MessageBubble
+            message={message}
+            highlight={highlight}
+            onCitationClick={onCitationClick}
+            onSelectPrompt={onSelectPrompt}
+          />
+        </div>
       ))}
       {pending && <TypingIndicator />}
     </div>
