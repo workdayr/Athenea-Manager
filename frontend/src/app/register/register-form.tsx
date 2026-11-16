@@ -3,14 +3,28 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, type FormEvent } from 'react';
+import {
+  AuthCard,
+  AuthDivider,
+  GoogleButton,
+  PasswordField,
+  authLinkClass,
+} from '@/components/auth/auth-shell';
+import { Alert } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/field';
 import { useToast } from '@/components/ui/toast-provider';
-import { authClient } from '@/lib/auth-client';
+import { authClient, frontendOrigin } from '@/lib/auth-client';
 import { mapAuthError, mapOAuthCallbackError } from '@/lib/auth-errors';
+import { useGuestOnly } from '@/lib/use-guest-only';
 
 const INSTITUTIONAL_DOMAIN = '@unipolidgo.edu.mx';
 
-function frontendOrigin(): string {
-  return window.location.origin;
+interface Errors {
+  name?: string;
+  email?: string;
+  password?: string;
+  confirmPassword?: string;
 }
 
 export function RegisterForm({
@@ -31,16 +45,20 @@ export function RegisterForm({
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [errors, setErrors] = useState<Errors>({});
+  const [formError, setFormError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   // Descarta el banner de ?error= cuando el usuario interactua.
   const [dismissed, setDismissed] = useState(false);
 
+  useGuestOnly();
+
   // Derivado de props (identico en servidor y cliente) + interaccion del
   // usuario. Al no guardarlo en state, las navegaciones client-side que
   // cambien ?error= tambien se reflejan.
   const oauthError = dismissed ? null : initialOAuthError;
-  const displayError = mapOAuthCallbackError(oauthError);
+  const oauthMessage = mapOAuthCallbackError(oauthError);
 
   // El callback OAuth redirige aqui con ?error=... cuando algo falla.
   // Solo limpia la URL (sistema externo); el mensaje ya llego por props.
@@ -50,25 +68,39 @@ export function RegisterForm({
     }
   }, []);
 
+  const passwordsMatch =
+    confirmPassword.length > 0 && password === confirmPassword;
+
+  function validate(): Errors {
+    const next: Errors = {};
+    if (name.trim().length === 0) {
+      next.name = 'Ingresa tu nombre completo.';
+    }
+    if (!email.trim()) {
+      next.email = 'Ingresa tu correo institucional.';
+    } else if (!email.trim().toLowerCase().endsWith(INSTITUTIONAL_DOMAIN)) {
+      next.email = `Solo se aceptan correos ${INSTITUTIONAL_DOMAIN}.`;
+    }
+    if (password.length < 8 || password.length > 64) {
+      next.password = 'La contraseña debe tener entre 8 y 64 caracteres.';
+    }
+    if (!confirmPassword) {
+      next.confirmPassword = 'Confirma tu contraseña.';
+    } else if (password !== confirmPassword) {
+      next.confirmPassword = 'Las contraseñas no coinciden.';
+    }
+    return next;
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setDismissed(true);
-    if (name.trim().length === 0) {
-      toast.error('Ingresa tu nombre completo.');
-      return;
-    }
-    if (!email.trim().toLowerCase().endsWith(INSTITUTIONAL_DOMAIN)) {
-      toast.error(
-        `Solo se aceptan correos institucionales ${INSTITUTIONAL_DOMAIN}.`,
-      );
-      return;
-    }
-    if (password.length < 8 || password.length > 64) {
-      toast.error('La contraseña debe tener entre 8 y 64 caracteres.');
-      return;
-    }
-    if (password !== confirmPassword) {
-      toast.error('Las contraseñas no coinciden.');
+    setFormError(null);
+    const next = validate();
+    setErrors(next);
+    const first = Object.keys(next)[0];
+    if (first) {
+      document.getElementById(first)?.focus();
       return;
     }
     setLoading(true);
@@ -79,12 +111,11 @@ export function RegisterForm({
     });
     if (signUpError) {
       setLoading(false);
-      toast.error(
+      setFormError(
         mapAuthError(
           signUpError,
           'No fue posible crear la cuenta. Intenta de nuevo.',
         ),
-        'No se pudo crear la cuenta',
       );
       return;
     }
@@ -108,6 +139,7 @@ export function RegisterForm({
 
   async function handleGoogleSignUp() {
     setDismissed(true);
+    setFormError(null);
     setGoogleLoading(true);
     // RF-015: registro (o login, si el email ya existe) con Google
     // Workspace. El alta por OAuth aplica la misma politica de dominios
@@ -120,151 +152,125 @@ export function RegisterForm({
     });
     setGoogleLoading(false);
     if (socialError) {
-      toast.error(
+      setFormError(
         mapAuthError(
           socialError,
           'El registro con Google no está disponible por el momento. Usa el formulario.',
         ),
-        'No se pudo continuar con Google',
       );
     }
     // Sin error el cliente redirige solo a Google.
   }
 
-  const inputClassName =
-    'w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 placeholder:text-gray-400 focus:border-blue-600 focus:outline-none';
-
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-10">
-      <section className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
-        <h1 className="text-2xl font-semibold text-gray-900">Crear cuenta</h1>
-        <p className="mt-1 text-sm text-gray-600">
-          Regístrate con tu correo institucional de la Universidad Politécnica
-          de Durango.
-        </p>
-
-        <form onSubmit={handleSubmit} className="mt-6 space-y-4" noValidate>
-          <div>
-            <label
-              htmlFor="name"
-              className="mb-1 block text-sm font-medium text-gray-700"
-            >
-              Nombre completo
-            </label>
-            <input
-              id="name"
-              name="name"
-              type="text"
-              autoComplete="name"
-              required
-              maxLength={150}
-              placeholder="Nombre Apellido"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              className={inputClassName}
-            />
-          </div>
-
-          <div>
-            <label
-              htmlFor="email"
-              className="mb-1 block text-sm font-medium text-gray-700"
-            >
-              Correo institucional
-            </label>
-            <input
-              id="email"
-              name="email"
-              type="email"
-              autoComplete="email"
-              required
-              placeholder="usuario@unipolidgo.edu.mx"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              className={inputClassName}
-            />
-          </div>
-
-          <div>
-            <label
-              htmlFor="password"
-              className="mb-1 block text-sm font-medium text-gray-700"
-            >
-              Contraseña (8 a 64 caracteres)
-            </label>
-            <input
-              id="password"
-              name="password"
-              type="password"
-              autoComplete="new-password"
-              required
-              minLength={8}
-              maxLength={64}
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className={inputClassName}
-            />
-          </div>
-
-          <div>
-            <label
-              htmlFor="confirmPassword"
-              className="mb-1 block text-sm font-medium text-gray-700"
-            >
-              Confirmar contraseña
-            </label>
-            <input
-              id="confirmPassword"
-              name="confirmPassword"
-              type="password"
-              autoComplete="new-password"
-              required
-              minLength={8}
-              maxLength={64}
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
-              className={inputClassName}
-            />
-          </div>
-
-          {displayError && (
-            <p
-              role="alert"
-              className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
-            >
-              {displayError}
-            </p>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading || googleLoading}
-            className="w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            {loading ? 'Creando cuenta…' : 'Crear cuenta'}
-          </button>
-        </form>
-
-        <div className="mt-4">
-          <button
-            type="button"
-            disabled={loading || googleLoading}
-            onClick={handleGoogleSignUp}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-          >
-            {googleLoading
-              ? 'Conectando con Google…'
-              : 'Crear cuenta con Google institucional'}
-          </button>
-        </div>
-
-        <p className="mt-6 text-center text-sm text-gray-600">
+    <AuthCard
+      title="Crear cuenta"
+      description="Regístrate con tu correo institucional de la Universidad Politécnica de Durango."
+      footer={
+        <p>
           ¿Ya tienes cuenta?{' '}
-          <Link href="/login" className="font-medium text-blue-600 hover:underline">
+          <Link href="/login" className={authLinkClass}>
             Inicia sesión
           </Link>
         </p>
-      </section>
-    </main>
+      }
+    >
+      <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+        <Input
+          id="name"
+          label="Nombre completo"
+          type="text"
+          autoComplete="name"
+          required
+          maxLength={150}
+          placeholder="Nombre Apellido"
+          value={name}
+          error={errors.name}
+          onChange={(event) => {
+            setName(event.target.value);
+            setErrors((current) => ({ ...current, name: undefined }));
+          }}
+        />
+
+        <Input
+          id="email"
+          label="Correo institucional"
+          type="email"
+          autoComplete="email"
+          required
+          placeholder={`usuario${INSTITUTIONAL_DOMAIN}`}
+          hint={`Debe terminar en ${INSTITUTIONAL_DOMAIN}`}
+          value={email}
+          error={errors.email}
+          onChange={(event) => {
+            setEmail(event.target.value);
+            setErrors((current) => ({ ...current, email: undefined }));
+          }}
+        />
+
+        <div>
+          <PasswordField
+            id="password"
+            label="Contraseña"
+            autoComplete="new-password"
+            value={password}
+            error={errors.password}
+            showStrength
+            onChange={(value) => {
+              setPassword(value);
+              setErrors((current) => ({ ...current, password: undefined }));
+            }}
+            hint="Entre 8 y 64 caracteres."
+          />
+        </div>
+
+        <div>
+          <PasswordField
+            id="confirmPassword"
+            label="Confirmar contraseña"
+            autoComplete="new-password"
+            value={confirmPassword}
+            error={errors.confirmPassword}
+            onChange={(value) => {
+              setConfirmPassword(value);
+              setErrors((current) => ({
+                ...current,
+                confirmPassword: undefined,
+              }));
+            }}
+          />
+          {passwordsMatch && (
+            <p className="mt-1.5 flex items-center gap-1 text-xs font-medium text-success">
+              <span aria-hidden="true">✓</span>
+              Las contraseñas coinciden.
+            </p>
+          )}
+        </div>
+
+        {(formError || oauthMessage) && (
+          <Alert tone="danger">{formError ?? oauthMessage}</Alert>
+        )}
+
+        <Button
+          type="submit"
+          fullWidth
+          loading={loading}
+          className="mt-1"
+          disabled={googleLoading}
+        >
+          {loading ? 'Creando cuenta…' : 'Crear cuenta'}
+        </Button>
+      </form>
+
+      <AuthDivider>o regístrate con</AuthDivider>
+
+      <GoogleButton
+        onClick={() => void handleGoogleSignUp()}
+        loading={googleLoading}
+        label={
+          googleLoading ? 'Conectando con Google…' : 'Google institucional'
+        }
+      />
+    </AuthCard>
   );
 }

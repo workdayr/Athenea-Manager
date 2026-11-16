@@ -14,6 +14,11 @@ export function getStoredToken(): string {
   return readStoredToken();
 }
 
+/** Origen del navegador, para construir callbackURL de OAuth. */
+export function frontendOrigin(): string {
+  return window.location.origin;
+}
+
 function storeToken(token: string | null): void {
   if (typeof window === 'undefined' || !token) {
     return;

@@ -1,11 +1,15 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
+import { useState } from 'react';
+import { AuthCard, authLinkClass } from '@/components/auth/auth-shell';
+import { Alert } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { ErrorState } from '@/components/ui/error-state';
 import { useToast } from '@/components/ui/toast-provider';
-import { authClient } from '@/lib/auth-client';
 import { acceptInvitation, teamErrorMessage } from '@/lib/teams';
+import { SessionLoading, useSessionUser } from '@/lib/use-session';
 
 /**
  * F2-02 / RF-011: aceptacion de una invitacion por token.
@@ -13,42 +17,15 @@ import { acceptInvitation, teamErrorMessage } from '@/lib/teams';
  */
 export default function InvitationPage() {
   const params = useParams<{ token: string }>();
-  const router = useRouter();
   const toast = useToast();
+  const { user, checking, failed, retry } = useSessionUser();
   const token = params?.token ?? '';
-  const [checking, setChecking] = useState(true);
-  const [email, setEmail] = useState<string | null>(null);
   const [accepting, setAccepting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [accepted, setAccepted] = useState<{
     projectId: number;
     projectTitle: string;
   } | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    authClient
-      .getSession()
-      .then(({ data }) => {
-        if (!active) {
-          return;
-        }
-        if (!data?.user) {
-          router.replace('/login');
-          return;
-        }
-        setEmail(data.user.email);
-        setChecking(false);
-      })
-      .catch(() => {
-        if (active) {
-          router.replace('/login');
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [router]);
 
   async function handleAccept() {
     setAccepting(true);
@@ -66,74 +43,78 @@ export default function InvitationPage() {
     }
   }
 
+  if (failed) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-surface px-4">
+        <ErrorState
+          className="w-full max-w-md bg-white"
+          title="No pudimos verificar tu sesión"
+          description="La conexión con el servidor falló. La invitación sigue disponible: inténtalo de nuevo."
+          onRetry={retry}
+        />
+      </main>
+    );
+  }
+
+  if (checking || !user) {
+    return <SessionLoading label="Verificando invitación…" />;
+  }
+
   return (
-    <main className="flex min-h-screen items-center justify-center bg-surface px-4 py-10">
-      <div className="w-full max-w-lg rounded-2xl border border-line bg-white p-7 shadow-sm">
-        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-700">
-          Athenea Manager · RF-011
-        </p>
-        <h1 className="mt-2 text-2xl font-semibold text-ink">
-          Invitacion a un proyecto
-        </h1>
-
-        {checking && (
-          <p className="mt-4 text-sm text-muted">Verificando sesion…</p>
-        )}
-
-        {!checking && !accepted && (
-          <>
-            <p className="mt-3 text-sm text-ink">
-              Has recibido una invitacion para colaborar en un proyecto de
-              investigacion.
-            </p>
-            <p className="mt-2 text-xs text-muted">
-              Se validara que la invitacion corresponda al correo{' '}
-              <strong className="text-ink">{email}</strong>. Si iniciaste sesion
-              con otra cuenta, cierra sesion y vuelve a abrir este enlace.
-            </p>
-            {!token && (
-              <p className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                El enlace no contiene un token valido.
-              </p>
-            )}
-            {error && (
-              <p className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                {error}
-              </p>
-            )}
-            <button
-              type="button"
-              disabled={accepting || token.length === 0}
-              onClick={() => void handleAccept()}
-              className="mt-5 w-full rounded-md bg-brand-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-800 disabled:opacity-50"
-            >
-              {accepting ? 'Aceptando invitacion…' : 'Aceptar invitacion'}
-            </button>
-          </>
-        )}
-
-        {accepted && (
-          <div className="mt-5">
-            <p className="rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-              Ya formas parte del proyecto{' '}
-              <strong>{accepted.projectTitle}</strong>.
-            </p>
-            <Link
-              href={`/projects/${accepted.projectId}`}
-              className="mt-4 inline-flex rounded-md bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800"
-            >
-              Ir al proyecto
-            </Link>
-          </div>
-        )}
-
-        <Link
-          href="/dashboard"
-          className="mt-5 block text-center text-xs font-medium text-muted hover:text-ink"
-        >
+    <AuthCard
+      title="Invitación a un proyecto"
+      description="Has recibido una invitación para colaborar en un proyecto de investigación."
+      footer={
+        <Link href="/dashboard" className={authLinkClass}>
           Volver al panel
         </Link>
-      </div>
-    </main>
+      }
+    >
+      {!accepted ? (
+        <div className="space-y-4">
+          <p className="text-[13px] leading-relaxed text-muted">
+            Se validará que la invitación corresponda al correo{' '}
+            <strong className="font-medium text-ink">{user.email}</strong>. Si
+            iniciaste sesión con otra cuenta, cierra sesión y vuelve a abrir
+            este enlace.
+          </p>
+
+          {!token && (
+            <Alert tone="danger" title="Enlace incompleto">
+              El enlace no contiene un token válido. Pide al administrador del
+              proyecto que te envíe una invitación nueva.
+            </Alert>
+          )}
+
+          {error && (
+            <Alert tone="danger" title="No pudimos aceptar la invitación">
+              {error}
+            </Alert>
+          )}
+
+          <Button
+            fullWidth
+            loading={accepting}
+            disabled={token.length === 0}
+            onClick={() => void handleAccept()}
+          >
+            {accepting ? 'Aceptando invitación…' : 'Aceptar invitación'}
+          </Button>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <Alert tone="success" title="Invitación aceptada">
+            Ya formas parte del proyecto{' '}
+            <strong className="font-semibold">{accepted.projectTitle}</strong>.
+          </Alert>
+          <Link
+            href={`/projects/${accepted.projectId}`}
+            className="inline-flex h-10 w-full items-center justify-center rounded-lg bg-brand-700 px-4 text-sm font-semibold text-white transition-colors duration-150 hover:bg-brand-800"
+          >
+            Ir al proyecto
+          </Link>
+        </div>
+      )}
+    </AuthCard>
   );
 }
