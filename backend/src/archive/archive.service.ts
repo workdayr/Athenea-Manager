@@ -1,6 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ROLES } from '../auth/roles.constants.js';
 import { prisma } from '../db/prisma.js';
 import { Prisma } from '../generated/prisma/client.js';
+import { notifyRole } from '../notifications/notifications.service.js';
+import {
+  buildPageInfo,
+  normalizePageArgs,
+  type PageInfo,
+} from '../common/pagination/pagination.policy.js';
 import {
   ARCHIVE_ALERT_MESSAGE_MAX_LENGTH,
   ARCHIVE_BATCH_SIZE,
@@ -32,6 +39,22 @@ export interface ArchiveBatchResult {
   archived: number;
   skipped: number;
   failed: number;
+}
+
+export interface ArchivedProjectRow {
+  project_id: number;
+  title: string;
+  status: string;
+  archived_at: Date;
+  snapshot_hash: string;
+}
+
+export interface ArchivedProjectPage {
+  items: ArchivedProjectRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  pageInfo: PageInfo;
 }
 
 export interface ArchiveAlertRow {
@@ -268,6 +291,38 @@ export class ProjectArchiveService {
     }
   }
 
+  /** RF-020: expedientes archivados con su hash y fecha de congelamiento. */
+  async listArchived(page = 1, pageSize = 20): Promise<ArchivedProjectPage> {
+    const ordering = normalizePageArgs({ page, pageSize }, [], {
+      sortDir: 'desc',
+    });
+    const [rows, total] = await Promise.all([
+      prisma.project_Archive.findMany({
+        orderBy: { archived_at: 'desc' },
+        skip: ordering.skip,
+        take: ordering.take,
+        include: {
+          project: { select: { project_id: true, title: true, status: true } },
+        },
+      }),
+      prisma.project_Archive.count(),
+    ]);
+
+    return {
+      items: rows.map((row) => ({
+        project_id: row.project.project_id,
+        title: row.project.title,
+        status: row.project.status,
+        archived_at: row.archived_at,
+        snapshot_hash: row.snapshot_hash,
+      })),
+      total,
+      page: ordering.page,
+      pageSize: ordering.pageSize,
+      pageInfo: buildPageInfo(ordering, total),
+    };
+  }
+
   /** Alertas de archivado; por defecto solo las no resueltas. */
   async listAlerts(onlyUnresolved = true): Promise<ArchiveAlertRow[]> {
     return prisma.archive_Alert.findMany({
@@ -306,20 +361,15 @@ export class ProjectArchiveService {
     }
 
     try {
-      const admins = await prisma.user.findMany({
-        where: { role: 'ADMINISTRATOR' },
-        select: { email: true },
+      const notified = await notifyRole(prisma, ROLES.ADMINISTRATOR, {
+        type: 'Archive',
+        title: 'Fallo de archivado de proyecto',
+        message: `No se pudo archivar ${target}: ${message}`,
+        link: '/dashboard',
       });
-      if (admins.length === 0) {
+      if (notified.length === 0) {
         this.logger.warn(
           'No hay administradores registrados para recibir la alerta.',
-        );
-        return;
-      }
-      for (const admin of admins) {
-        // Mismo patron que el resto de notificaciones del proyecto (RF-019).
-        console.log(
-          `[EMAIL MOCK] Alerta de archivado (RF-020) - ${target}: ${message} -> ${admin.email}`,
         );
       }
     } catch (notifyError) {

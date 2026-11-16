@@ -19,6 +19,16 @@ export interface ProjectRow {
   status: string;
   call_id: number | null;
   budget_enabled?: boolean;
+  is_confidential?: boolean;
+  research_involves_humans?: boolean;
+  research_involves_animals?: boolean;
+  uses_sensitive_data?: boolean;
+  anonymization_certified?: boolean;
+  anonymization_certified_at?: Date | null;
+  retention_delete_at?: Date | null;
+  retention_notified_at?: Date | null;
+  retention_deleted_at?: Date | null;
+  status_changed_at?: Date;
   is_read_only?: boolean | null;
   archived_at?: Date | null;
   call?: { title: string } | null;
@@ -82,5 +92,15 @@ export function toProjectGql(
   project.budgetSpent = budgetSpent;
   project.isReadOnly = row.is_read_only === true;
   project.archivedAt = row.archived_at ?? null;
+  project.isConfidential = row.is_confidential === true;
+  project.researchInvolvesHumans = row.research_involves_humans === true;
+  project.researchInvolvesAnimals = row.research_involves_animals === true;
+  project.usesSensitiveData = row.uses_sensitive_data === true;
+  project.anonymizationCertified = row.anonymization_certified === true;
+  project.anonymizationCertifiedAt = row.anonymization_certified_at ?? null;
+  project.retentionDeleteAt = row.retention_delete_at ?? null;
+  project.retentionNotifiedAt = row.retention_notified_at ?? null;
+  project.retentionDeletedAt = row.retention_deleted_at ?? null;
+  project.statusChangedAt = row.status_changed_at ?? new Date(0);
   return project;
 }

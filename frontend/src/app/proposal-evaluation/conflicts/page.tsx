@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useToast } from '@/components/ui/toast-provider';
 import { authClient } from '@/lib/auth-client';
 import {
   getApolloClient,
@@ -31,13 +32,12 @@ const inputClassName =
  */
 export default function ConflictReviewsPage() {
   const router = useRouter();
+  const toast = useToast();
   const [checking, setChecking] = useState(true);
   const [denied, setDenied] = useState(false);
   const [conflicts, setConflicts] = useState<ConflictReview[] | null>(null);
   const [resolution, setResolution] = useState<Record<number, string>>({});
   const [note, setNote] = useState<Record<number, string>>({});
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState<number | null>(null);
 
   const loadConflicts = useCallback(async () => {
@@ -50,10 +50,13 @@ export default function ConflictReviewsPage() {
       });
       setConflicts(data?.pendingConflictReviews ?? []);
     } catch (queryError: unknown) {
-      setError('No fue posible cargar las alertas. Intenta de nuevo.');
+      toast.error(
+        'No fue posible cargar las alertas. Intenta de nuevo.',
+        'No se pudieron cargar las alertas',
+      );
       void queryError;
     }
-  }, []);
+  }, [toast]);
 
   useEffect(() => {
     let active = true;
@@ -84,16 +87,14 @@ export default function ConflictReviewsPage() {
     conflictId: number,
   ) {
     event.preventDefault();
-    setError(null);
-    setSuccess(null);
     const chosen = resolution[conflictId] ?? 'Cleared';
     const text = (note[conflictId] ?? '').trim();
     if (text.length === 0) {
-      setError('La nota de resolución es obligatoria.');
+      toast.error('La nota de resolución es obligatoria.');
       return;
     }
     if (text.length > NOTE_MAX) {
-      setError(`La nota excede ${NOTE_MAX} caracteres.`);
+      toast.error(`La nota excede ${NOTE_MAX} caracteres.`);
       return;
     }
     setSubmitting(conflictId);
@@ -102,18 +103,20 @@ export default function ConflictReviewsPage() {
         mutation: RESOLVE_CONFLICT_REVIEW_MUTATION,
         variables: { input: { conflictId, resolution: chosen, note: text } },
       });
-      setSuccess(
+      toast.success(
         `Alerta #${conflictId} resuelta como ${chosen === 'Cleared' ? 'sin conflicto' : 'conflicto confirmado'}.`,
+        'Alerta resuelta',
       );
       await loadConflicts();
     } catch (submitError: unknown) {
       const code = graphqlErrorCode(submitError);
-      setError(
+      toast.error(
         code === 'INVALID_STATE'
           ? 'La alerta ya fue resuelta por otro administrador.'
           : code === 'NOT_FOUND'
             ? 'La alerta no existe.'
             : 'No fue posible resolver la alerta. Intenta de nuevo.',
+        'No se pudo resolver la alerta',
       );
     } finally {
       setSubmitting(null);
@@ -151,24 +154,7 @@ export default function ConflictReviewsPage() {
           Alertas pendientes de revisión
         </h1>
 
-        {error && (
-          <p
-            role="alert"
-            className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
-          >
-            {error}
-          </p>
-        )}
-        {success && (
-          <p
-            role="status"
-            className="mt-4 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800"
-          >
-            {success}
-          </p>
-        )}
-
-        {conflicts !== null && conflicts.length === 0 && !error && (
+        {conflicts !== null && conflicts.length === 0 && (
           <p className="mt-4 rounded-md border border-gray-200 bg-white px-3 py-4 text-sm text-gray-600">
             No hay alertas pendientes.
           </p>

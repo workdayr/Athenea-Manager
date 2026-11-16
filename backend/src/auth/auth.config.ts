@@ -19,6 +19,10 @@ import {
   unauthorizedDomainMessage,
   type LockoutState,
 } from './auth.policy.js';
+import {
+  sendPasswordResetEmail,
+  sendVerificationEmail,
+} from './auth.emails.js';
 
 /** Campos de bloqueo leidos de la fila del usuario (additionalFields). */
 interface UserLockoutRow extends LockoutState {
@@ -27,6 +31,27 @@ interface UserLockoutRow extends LockoutState {
 
 const SIGN_UP_EMAIL_PATH = '/sign-up/email';
 const SIGN_IN_EMAIL_PATH = '/sign-in/email';
+
+/** Vigencia de los enlaces de recuperacion (RF-010: 30 minutos). */
+export const PASSWORD_RESET_TOKEN_TTL_SECONDS = 30 * 60;
+
+/** Vigencia del enlace de verificacion de correo (24 horas). */
+export const EMAIL_VERIFICATION_TTL_SECONDS = 24 * 60 * 60;
+
+/**
+ * RF-010: exigir correo verificado para iniciar sesion. Se controla con
+ * `EMAIL_VERIFICATION_REQUIRED` y, si la variable no existe, se activa
+ * solo en produccion para no bloquear entornos de desarrollo.
+ */
+export function resolveRequireEmailVerification(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const raw = env['EMAIL_VERIFICATION_REQUIRED']?.trim().toLowerCase();
+  if (raw === undefined || raw === '') {
+    return env['NODE_ENV'] === 'production';
+  }
+  return ['1', 'true', 'yes', 'on'].includes(raw);
+}
 
 /**
  * Construye las opciones de BetterAuth de forma reutilizable:
@@ -59,9 +84,21 @@ export function buildAuthOptions(
     ],
     emailAndPassword: {
       enabled: true,
-      // La verificacion de correo se anade en una tarea posterior (fuera de alcance).
-      requireEmailVerification: false,
+      // RF-010 / F1-06: con verificacion exigida, el alta no crea sesion
+      // hasta que el usuario confirme su correo. En desarrollo queda
+      // desactivada por defecto (ver resolveRequireEmailVerification).
+      requireEmailVerification: resolveRequireEmailVerification(),
       autoSignIn: true,
+      // RF-010: enlace de recuperacion valido 30 minutos y de un solo uso.
+      // Al cambiar la contrasena se revocan las sesiones abiertas.
+      resetPasswordTokenExpiresIn: PASSWORD_RESET_TOKEN_TTL_SECONDS,
+      revokeSessionsOnPasswordReset: true,
+      sendResetPassword: async ({ user, token }) => {
+        await sendPasswordResetEmail(
+          { name: user.name, email: user.email },
+          token,
+        );
+      },
       minPasswordLength: MIN_PASSWORD_LENGTH,
       maxPasswordLength: MAX_PASSWORD_LENGTH,
       password: {
@@ -70,6 +107,21 @@ export function buildAuthOptions(
           bcrypt.hash(password, BCRYPT_COST_FACTOR),
         verify: ({ hash, password }: { hash: string; password: string }) =>
           bcrypt.compare(password, hash),
+      },
+    },
+    // RF-010 / F1-06: verificacion de correo. El enlace se envia al
+    // registrarse y puede reenviarse desde /verify-email. La cuenta no
+    // inicia sesion automaticamente tras verificar: el usuario vuelve al
+    // login (las sesiones existentes no se tocan).
+    emailVerification: {
+      sendOnSignUp: true,
+      autoSignInAfterVerification: false,
+      expiresIn: EMAIL_VERIFICATION_TTL_SECONDS,
+      sendVerificationEmail: async ({ user, token }) => {
+        await sendVerificationEmail(
+          { name: user.name, email: user.email },
+          token,
+        );
       },
     },
     // RF-015: login con Google Workspace. Se pasa el objeto de opciones

@@ -17,11 +17,34 @@ services:
       # clamd se alcanza por el nombre del servicio.
       CLAMAV_HOST: clamav
       CLAMAV_PORT: "3310"
+      # RF-014: correo saliente hacia Mailpit (captura local, sin relay).
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      # F1-08: los archivos subidos deben sobrevivir a los reinicios y
+      # entrar en el respaldo (ver docker/backup/README.md).
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      - uploads:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
       clamav:
         condition: service_healthy
+      mailpit:
+        condition: service_started
+    # F1-08: el orquestador solo enruta trafico si /health responde 200.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3001/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
   web:
@@ -80,5 +103,20 @@ services:
       # Aumentado a 3 minutos para dar tiempo a freshclam de bajar las firmas
       start_period: 180s
 
+  mailpit:
+    # RF-014: SMTP local de captura para desarrollo. No entrega correos
+    # reales; la UI web (http://localhost:8025) lista los mensajes
+    # enviados por la outbox del backend.
+    image: axllent/mailpit:latest
+    ports:
+      - "1025:1025" # SMTP
+      - "8025:8025" # UI web
+    environment:
+      MP_MAX_MESSAGES: "500"
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+    restart: unless-stopped
+
 volumes:
   pgdata:
+  uploads:

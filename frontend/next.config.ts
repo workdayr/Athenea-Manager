@@ -33,6 +33,21 @@ const nextConfig: NextConfig = {
         source: "/api/milestones/:path*",
         destination: `${backendURL}/milestones/:path*`,
       },
+      // F1-05: Descarga protegida y streaming de documentos (RNF-005)
+      {
+        source: "/api/documents/:path*",
+        destination: `${backendURL}/documents/:path*`,
+      },
+      // F1-10: Descarga del dictamen PDF (RF-019)
+      {
+        source: "/api/decisions/:path*",
+        destination: `${backendURL}/decisions/:path*`,
+      },
+      // F2-05: Exportacion de reportes CSV/PDF (RF-008)
+      {
+        source: "/api/reports/:path*",
+        destination: `${backendURL}/reports/:path*`,
+      },
     ];
   },
 };

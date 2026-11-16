@@ -68,6 +68,40 @@ export function detectFamilyConflict(
   return [...matched];
 }
 
+/**
+ * F1-10 / BR-004: normaliza el departamento academico para compararlo
+ * (sin acentos, mayusculas ni espacios repetidos). Vacio = sin dato.
+ */
+export function normalizeDepartment(
+  value: string | null | undefined,
+): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const normalized = value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, ' ')
+    .split(/\s+/)
+    .filter((token) => token.length > 0)
+    .join(' ');
+  return normalized.length > 0 ? normalized : null;
+}
+
+/**
+ * BR-004: evaluador y PI pertenecen al mismo departamento. Solo bloquea
+ * cuando AMBOS departamentos estan declarados (D-02 pendiente de origen).
+ */
+export function isSameDepartment(
+  evaluatorDepartment: string | null | undefined,
+  piDepartment: string | null | undefined,
+): boolean {
+  const left = normalizeDepartment(evaluatorDepartment);
+  const right = normalizeDepartment(piDepartment);
+  return left !== null && right !== null && left === right;
+}
+
 /** BR-004 (parcial): el evaluador pertenece al equipo del proyecto. */
 export function isSelfReview(
   evaluatorId: string,

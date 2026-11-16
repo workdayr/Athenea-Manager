@@ -2,6 +2,7 @@
 
 import { useParams, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useToast } from '@/components/ui/toast-provider';
 import { authClient } from '@/lib/auth-client';
 import {
   getApolloClient,
@@ -10,8 +11,11 @@ import {
 import {
   blockReasonMessage,
   DECISION_LABELS,
+  downloadDecisionReport,
+  fetchDecisionReportStatus,
   PROPOSAL_EVALUATION_CONTEXT_QUERY,
   SUBMIT_PROJECT_DECISION_MUTATION,
+  type DecisionReport,
   type ProposalContext,
 } from '@/lib/proposal-evaluation';
 
@@ -30,6 +34,7 @@ const inputClassName =
  */
 export default function ProposalEvaluationDetailPage() {
   const router = useRouter();
+  const toast = useToast();
   const params = useParams<{ projectId: string }>();
   const projectId = Number(params?.projectId);
 
@@ -38,13 +43,11 @@ export default function ProposalEvaluationDetailPage() {
   const [context, setContext] = useState<ProposalContext | null>(null);
   const [decision, setDecision] = useState<string>('Approved');
   const [justification, setJustification] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const loadContext = useCallback(async () => {
     if (!Number.isInteger(projectId)) {
-      setError('Identificador de proyecto inválido.');
+      toast.error('Identificador de proyecto inválido.');
       return;
     }
     try {
@@ -58,13 +61,14 @@ export default function ProposalEvaluationDetailPage() {
       setContext(data?.proposalEvaluationContext ?? null);
     } catch (queryError: unknown) {
       const code = graphqlErrorCode(queryError);
-      setError(
+      toast.error(
         code === 'NOT_FOUND'
           ? 'El proyecto no existe.'
           : 'No fue posible cargar la propuesta. Intenta de nuevo.',
+        'No se pudo cargar la propuesta',
       );
     }
-  }, [projectId]);
+  }, [projectId, toast]);
 
   useEffect(() => {
     let active = true;
@@ -92,16 +96,12 @@ export default function ProposalEvaluationDetailPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
-    setSuccess(null);
     if (justification.trim().length === 0) {
-      setError('La justificación de la decisión es obligatoria (RF-019).');
+      toast.error('La justificación de la decisión es obligatoria (RF-019).');
       return;
     }
     if (justification.trim().length > JUSTIFICATION_MAX) {
-      setError(
-        `La justificación excede ${JUSTIFICATION_MAX} caracteres.`,
-      );
+      toast.error(`La justificación excede ${JUSTIFICATION_MAX} caracteres.`);
       return;
     }
     setSubmitting(true);
@@ -119,28 +119,41 @@ export default function ProposalEvaluationDetailPage() {
         },
       });
       const status = data?.submitProjectDecision.status;
-      setSuccess(
+      toast.success(
         `Decisión registrada: ${DECISION_LABELS[data?.submitProjectDecision.decision ?? ''] ?? ''} · estado del proyecto: ${status}.`,
+        'Decisión registrada',
       );
       setJustification('');
       await loadContext();
     } catch (submitError: unknown) {
       const code = graphqlErrorCode(submitError);
       if (code === 'FAMILY_CONFLICT') {
-        setError(
+        toast.error(
           'Conflicto de interés familiar (BR-011): la evaluación está bloqueada hasta la revisión del Administrador.',
+          'Evaluación bloqueada',
         );
         await loadContext();
       } else if (code === 'SELF_REVIEW') {
-        setError('No puedes evaluar un proyecto de tu propio equipo (BR-004).');
+        toast.error(
+          'No puedes evaluar un proyecto de tu propio equipo (BR-004).',
+        );
+      } else if (code === 'DEPARTMENT_CONFLICT') {
+        toast.error(
+          'No puedes evaluar un proyecto del mismo departamento que el Investigador Principal (BR-004).',
+          'Evaluación bloqueada',
+        );
+        await loadContext();
       } else if (code === 'INVALID_STATE') {
-        setError('El proyecto ya no admite decisión en su estado actual.');
+        toast.error(
+          'El proyecto ya no admite decisión en su estado actual.',
+        );
         await loadContext();
       } else {
-        setError(
+        toast.error(
           submitError instanceof Error
             ? submitError.message
             : 'No fue posible registrar la decisión. Intenta de nuevo.',
+          'No se pudo registrar la decisión',
         );
       }
     } finally {
@@ -186,23 +199,6 @@ export default function ProposalEvaluationDetailPage() {
         {context && (
           <p className="mt-1 text-sm text-gray-600">
             Proyecto #{context.projectId} · Estado: {context.status}
-          </p>
-        )}
-
-        {error && (
-          <p
-            role="alert"
-            className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
-          >
-            {error}
-          </p>
-        )}
-        {success && (
-          <p
-            role="status"
-            className="mt-4 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800"
-          >
-            {success}
           </p>
         )}
 
@@ -271,6 +267,10 @@ export default function ProposalEvaluationDetailPage() {
                       <p className="mt-1 text-sm text-gray-700">
                         {item.justification}
                       </p>
+                      {/* F1-10 / RF-019: dictamen PDF asincrono. */}
+                      <DecisionReportPanel
+                        evaluationId={Number(item.evaluationId)}
+                      />
                     </li>
                   ))}
                 </ul>
@@ -342,5 +342,94 @@ export default function ProposalEvaluationDetailPage() {
         )}
       </div>
     </main>
+  );
+}
+
+/**
+ * F1-10 / RF-019: estado del dictamen PDF de una decision. Consulta al
+ * servidor y reintenta cada 3 s mientras el worker lo genera; no bloquea
+ * la evaluacion ni el resto de la pantalla.
+ */
+function DecisionReportPanel({ evaluationId }: { evaluationId: number }) {
+  const toast = useToast();
+  const [report, setReport] = useState<DecisionReport | null>(null);
+  const [downloading, setDownloading] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    async function poll() {
+      try {
+        const status = await fetchDecisionReportStatus(evaluationId);
+        if (!active) {
+          return;
+        }
+        setReport(status);
+        if (status.status === 'Pending') {
+          timer = setTimeout(() => void poll(), 3_000);
+        }
+      } catch {
+        if (active) {
+          setReport(null);
+        }
+      }
+    }
+
+    void poll();
+    return () => {
+      active = false;
+      if (timer) {
+        clearTimeout(timer);
+      }
+    };
+  }, [evaluationId]);
+
+  async function handleDownload() {
+    setDownloading(true);
+    try {
+      await downloadDecisionReport(evaluationId);
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'No fue posible descargar el dictamen.',
+        'Descarga no disponible',
+      );
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  if (!report) {
+    return null;
+  }
+
+  if (report.status === 'Pending') {
+    return (
+      <p className="mt-2 text-xs text-gray-500">
+        Generando dictamen en PDF…
+      </p>
+    );
+  }
+
+  if (report.status === 'Failed') {
+    return (
+      <p className="mt-2 text-xs text-red-700">
+        No se pudo generar el dictamen PDF. El equipo de soporte revisará el
+        error.
+      </p>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void handleDownload()}
+      disabled={downloading}
+      className="mt-2 text-xs font-medium text-blue-700 hover:underline disabled:opacity-50"
+    >
+      {downloading ? 'Descargando…' : 'Descargar dictamen PDF'}
+    </button>
   );
 }

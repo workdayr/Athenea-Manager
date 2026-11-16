@@ -5,6 +5,7 @@ import {
   Param,
   ParseIntPipe,
   Post,
+  Req,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -40,6 +41,7 @@ export class DocumentsController {
     @Body('docType') docType: string,
     @UploadedFile() file: Express.Multer.File | undefined,
     @CurrentUser() user: AuthenticatedUser,
+    @Req() req: { ip?: string },
   ) {
     try {
       if (!file) {
@@ -59,6 +61,7 @@ export class DocumentsController {
           originalname: file.originalname,
           size: file.size,
         },
+        req.ip ?? 'unknown',
       );
     } catch (error) {
       if (

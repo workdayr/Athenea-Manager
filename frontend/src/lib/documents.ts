@@ -24,6 +24,15 @@ export type ProjectDocumentType =
   | 'ETHICS_APPROVAL'
   | 'EVIDENCE';
 
+/** F1-11 / BR-003: estado de revision administrativa. */
+export type DocumentReviewStatus = 'Pending' | 'Approved' | 'Rejected';
+
+export const REVIEW_STATUS_LABELS: Record<DocumentReviewStatus, string> = {
+  Pending: 'Pendiente de revisión',
+  Approved: 'Aprobado',
+  Rejected: 'Rechazado',
+};
+
 export interface ProjectDocument {
   documentId: number;
   projectId: number;
@@ -35,6 +44,21 @@ export interface ProjectDocument {
   uploadedAt: string;
   mandatoryReview: boolean;
   canChangeVisibility: boolean;
+  reviewStatus: DocumentReviewStatus;
+  reviewedAt: string | null;
+  reviewerName: string | null;
+  reviewNotes: string | null;
+  canReview: boolean;
+}
+
+/** F1-11: datos eticos del proyecto para la certificacion BR-012. */
+export interface ProjectEthicsInfo {
+  projectId: string;
+  researchInvolvesHumans: boolean;
+  researchInvolvesAnimals: boolean;
+  usesSensitiveData: boolean;
+  anonymizationCertified: boolean;
+  anonymizationCertifiedAt: string | null;
 }
 
 export const DOC_TYPE_LABELS: Record<ProjectDocumentType, string> = {
@@ -102,6 +126,11 @@ export const PROJECT_DOCUMENTS_QUERY = gql`
       uploadedAt
       mandatoryReview
       canChangeVisibility
+      reviewStatus
+      reviewedAt
+      reviewerName
+      reviewNotes
+      canReview
     }
   }
 `;
@@ -158,6 +187,119 @@ export async function updateDocumentVisibility(
   return updated;
 }
 
+export const REVIEW_PROJECT_DOCUMENT_MUTATION = gql`
+  mutation ReviewProjectDocument(
+    $projectId: Int!
+    $documentId: Int!
+    $decision: DocumentReviewStatus!
+    $notes: String
+  ) {
+    reviewProjectDocument(
+      projectId: $projectId
+      documentId: $documentId
+      decision: $decision
+      notes: $notes
+    ) {
+      documentId
+      projectId
+      docType
+      visibility
+      fileName
+      fileSize
+      version
+      uploadedAt
+      mandatoryReview
+      canChangeVisibility
+      reviewStatus
+      reviewedAt
+      reviewerName
+      reviewNotes
+      canReview
+    }
+  }
+`;
+
+export const PROJECT_ETHICS_QUERY = gql`
+  query ProjectEthics($projectId: Int!) {
+    project(projectId: $projectId) {
+      projectId
+      researchInvolvesHumans
+      researchInvolvesAnimals
+      usesSensitiveData
+      anonymizationCertified
+      anonymizationCertifiedAt
+    }
+  }
+`;
+
+export const CERTIFY_PROJECT_ANONYMIZATION_MUTATION = gql`
+  mutation CertifyProjectAnonymization($projectId: Int!) {
+    certifyProjectAnonymization(projectId: $projectId) {
+      projectId
+      certified
+      certifiedAt
+    }
+  }
+`;
+
+/**
+ * F1-11 / BR-003: aprueba o rechaza el informe final o la aprobacion de
+ * etica. Solo Administracion y Coordinacion.
+ */
+export async function reviewProjectDocument(
+  projectId: number,
+  documentId: number,
+  decision: 'Approved' | 'Rejected',
+  notes: string | null = null,
+): Promise<ProjectDocument> {
+  const result = await getApolloClient().mutate<{
+    reviewProjectDocument: ProjectDocument;
+  }>({
+    mutation: REVIEW_PROJECT_DOCUMENT_MUTATION,
+    variables: { projectId, documentId, decision, notes },
+  });
+  const updated = result.data?.reviewProjectDocument;
+  if (!updated) {
+    throw new Error('El servidor no devolvió el documento revisado.');
+  }
+  return updated;
+}
+
+/** F1-11: consulta las banderas eticas y el estado de certificacion. */
+export async function fetchProjectEthics(
+  projectId: number,
+): Promise<ProjectEthicsInfo> {
+  const result = await getApolloClient().query<{
+    project: ProjectEthicsInfo;
+  }>({
+    query: PROJECT_ETHICS_QUERY,
+    variables: { projectId },
+    fetchPolicy: 'network-only',
+  });
+  const project = result.data?.project;
+  if (!project) {
+    throw new Error('El servidor no devolvió la información del proyecto.');
+  }
+  return project;
+}
+
+/** F1-11 / BR-012: el PI certifica la anonimizacion de los datasets. */
+export async function certifyProjectAnonymization(
+  projectId: number,
+): Promise<{ certified: boolean; certifiedAt: string }> {
+  const result = await getApolloClient().mutate<{
+    certifyProjectAnonymization: { certified: boolean; certifiedAt: string };
+  }>({
+    mutation: CERTIFY_PROJECT_ANONYMIZATION_MUTATION,
+    variables: { projectId },
+  });
+  const certification = result.data?.certifyProjectAnonymization;
+  if (!certification) {
+    throw new Error('El servidor no confirmó la certificación.');
+  }
+  return certification;
+}
+
 /** Mensaje legible para errores de visibilidad (backend en espanol). */
 export function visibilityErrorMessage(error: unknown): string {
   const graphQLError = (
@@ -172,4 +314,50 @@ export function visibilityErrorMessage(error: unknown): string {
     return error.message;
   }
   return 'No se pudo actualizar la visibilidad. Intenta de nuevo.';
+}
+
+/** Mensaje legible para errores de revision o certificacion (F1-11). */
+export function documentActionErrorMessage(error: unknown): string {
+  const graphQLError = (
+    error as {
+      graphQLErrors?: Array<{ message?: string }>;
+    }
+  )?.graphQLErrors?.[0];
+  if (graphQLError?.message) {
+    return graphQLError.message;
+  }
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return 'No se pudo completar la operación. Intenta de nuevo.';
+}
+
+/**
+ * F1-05 / RNF-005: Descarga protegida de documentos con token firmado temporal.
+ */
+export async function downloadProjectDocument(documentId: number): Promise<void> {
+  const response = await fetch(`/api/documents/${documentId}/download`, {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    let msg = 'No se pudo generar el enlace de descarga.';
+    try {
+      const body = await response.json();
+      if (body.message) msg = body.message;
+    } catch {}
+    throw new Error(msg);
+  }
+
+  const { url } = (await response.json()) as { url: string };
+  // Crear enlace temporal para disparar la descarga
+  const a = document.createElement('a');
+  a.href = url;
+  a.setAttribute('download', '');
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }

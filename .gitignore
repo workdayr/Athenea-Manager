@@ -98,3 +98,6 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 # Archivos subidos en desarrollo (US 2.1, RF-016). En produccion va volumen.
 /uploads
+
+# F1-08: respaldos locales (nunca versionar)
+backups/

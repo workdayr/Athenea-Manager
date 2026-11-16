@@ -1,7 +1,9 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useState, type ReactNode } from 'react';
+import { NotificationBell } from '@/components/notifications/notification-bell';
 import { Icon } from './icons';
 import {
   ROLE_LABELS,
@@ -37,8 +39,17 @@ export function AppShell({
   onSignOut,
   children,
 }: AppShellProps) {
+  const router = useRouter();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const navItems = navItemsForRole(user.role);
+
+  function submitSearch(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const query = searchQuery.trim();
+    if (query.length > 0) {
+      router.push(`/search?q=${encodeURIComponent(query)}`);
+    }
+  }
 
   return (
     <div className="min-h-screen bg-surface">
@@ -67,19 +78,25 @@ export function AppShell({
             </span>
           </Link>
 
-          <label className="relative mx-auto hidden w-full max-w-md md:block">
-            <span className="sr-only">Búsqueda global</span>
-            <Icon
-              name="search"
-              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted"
-            />
-            <input
-              value={searchQuery}
-              onChange={(event) => onSearchChange(event.target.value)}
-              placeholder={searchPlaceholder}
-              className="h-9 w-full rounded-full border border-transparent bg-[#f1f3f9] pl-9 pr-4 text-sm text-ink placeholder:text-[#8a93a8] focus:border-brand-300 focus:bg-white focus:outline-none"
-            />
-          </label>
+          <form
+            onSubmit={submitSearch}
+            role="search"
+            className="relative mx-auto hidden w-full max-w-md md:block"
+          >
+            <label className="relative block">
+              <span className="sr-only">Búsqueda global</span>
+              <Icon
+                name="search"
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted"
+              />
+              <input
+                value={searchQuery}
+                onChange={(event) => onSearchChange(event.target.value)}
+                placeholder={searchPlaceholder}
+                className="h-9 w-full rounded-full border border-transparent bg-[#f1f3f9] pl-9 pr-4 text-sm text-ink placeholder:text-[#8a93a8] focus:border-brand-300 focus:bg-white focus:outline-none"
+              />
+            </label>
+          </form>
 
           <div className="ml-auto flex items-center gap-2 sm:gap-3">
             <div
@@ -91,14 +108,7 @@ export function AppShell({
               <Icon name="chevronDown" className="h-3.5 w-3.5 text-muted" />
             </div>
 
-            <button
-              type="button"
-              className="relative grid h-9 w-9 place-items-center rounded-lg border border-line text-muted transition hover:text-ink"
-              aria-label="Notificaciones"
-            >
-              <Icon name="bell" className="h-4 w-4" />
-              <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-red-500 ring-2 ring-white" />
-            </button>
+            <NotificationBell />
 
             <div className="flex items-center gap-2.5 border-l border-line pl-2 sm:pl-3">
               <span className="grid h-9 w-9 place-items-center rounded-full bg-gradient-to-br from-brand-600 to-brand-400 text-xs font-semibold text-white">

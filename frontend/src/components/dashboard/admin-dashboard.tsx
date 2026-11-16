@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useToast } from '@/components/ui/toast-provider';
 import { useQuery } from '@apollo/client/react';
 import { Icon } from './icons';
 import { KpiCard } from './kpi-card';
@@ -21,6 +22,7 @@ import {
   PHASE_STATUSES,
   buildDashboardKpis,
   dashboardLifecycle,
+  downloadCoordinatorReport,
   mapDashboardProject,
   statusShares,
   type CoordinatorDashboardData,
@@ -120,6 +122,8 @@ export function AdminDashboard({
   const [call, setCall] = useState('all');
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
+  const [exporting, setExporting] = useState<'csv' | 'pdf' | null>(null);
+  const toast = useToast();
   const client = useMemo(() => getApolloClient(), []);
 
   const canSeeBudget =
@@ -242,43 +246,27 @@ export function AdminDashboard({
     setPage(1);
   }
 
-  function handleExport() {
-    // RF-008: la exportacion ejecutiva PDF/XLSX queda pendiente; por ahora
-    // se entrega la pagina visible del inventario en CSV (compatible con
-    // Excel). La paginacion es del servidor, por lo que el archivo refleja
-    // exactamente las filas mostradas.
-    const header = [
-      'Clave',
-      'Titulo',
-      'Investigador',
-      'Convocatoria',
-      'Hito actual',
-      'Vencimiento',
-      'Semaforo',
-      'Estado',
-    ];
-    const csvRows = rows.map((project) => [
-      project.id,
-      project.title,
-      project.pi,
-      project.call,
-      project.milestone,
-      formatDate(project.dueDate),
-      SLA_LABELS[project.sla],
-      STATUS_LABELS[project.projectStatus] ?? project.projectStatus,
-    ]);
-    const csv = [header, ...csvRows]
-      .map((row) => row.map(escapeCsv).join(';'))
-      .join('\r\n');
-    const blob = new Blob([`\uFEFF${csv}`], {
-      type: 'text/csv;charset=utf-8;',
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `athenea-proyectos-${year}-pagina-${safePage}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
+  async function handleExport(format: 'csv' | 'pdf') {
+    // F2-05 / RF-008: el servidor genera el archivo con TODOS los registros
+    // que cumplen los filtros (no solo la pagina visible) y aplica la
+    // visibilidad por rol, incluido el presupuesto oculto al Comité.
+    setExporting(format);
+    try {
+      await downloadCoordinatorReport(filters, format);
+      toast.success(
+        `Informe ${format.toUpperCase()} generado con los filtros activos.`,
+        'Exportación lista',
+      );
+    } catch (exportError) {
+      toast.error(
+        exportError instanceof Error
+          ? exportError.message
+          : 'No fue posible exportar el reporte. Intenta de nuevo.',
+        'No se pudo exportar',
+      );
+    } finally {
+      setExporting(null);
+    }
   }
 
   if (!metrics && loading) {
@@ -391,14 +379,24 @@ export function AdminDashboard({
             </select>
             <button
               type="button"
-              onClick={handleExport}
-              disabled={rows.length === 0}
+              onClick={() => void handleExport('csv')}
+              disabled={rows.length === 0 || exporting !== null}
               className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-900 px-3.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-50"
-              title="Exporta la página visible del inventario en CSV (PDF/XLSX pendiente, RF-008)"
+              title="Exporta todos los proyectos que cumplen los filtros en CSV (RF-008)"
             >
               <Icon name="download" className="h-4 w-4" />
-              Exportar Informe Ejecutivo
+              {exporting === 'csv' ? 'Exportando…' : 'Exportar Informe Ejecutivo'}
               <span className="text-[10px] font-medium text-white/70">CSV</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleExport('pdf')}
+              disabled={rows.length === 0 || exporting !== null}
+              className="inline-flex h-9 items-center gap-2 rounded-md border border-line bg-white px-3.5 text-xs font-semibold text-ink shadow-sm transition hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-50"
+              title="Descarga el informe ejecutivo en PDF con los mismos filtros"
+            >
+              <Icon name="download" className="h-4 w-4" />
+              {exporting === 'pdf' ? 'Exportando…' : 'PDF'}
             </button>
           </div>
         </div>
@@ -938,10 +936,6 @@ function roleScopeLabel(role: DashboardUser['role']): string {
     return 'Coordinación';
   }
   return 'Administración';
-}
-
-function escapeCsv(value: string): string {
-  return `"${value.replace(/"/g, '""')}"`;
 }
 
 /** Referencia usada por el buscador superior cuando el rol es institucional. */

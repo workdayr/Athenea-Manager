@@ -87,6 +87,41 @@ export class ProjectGql {
   /** RF-020: fecha en que se congelo el expediente. */
   @Field(() => GraphQLISODateTime, { nullable: true })
   archivedAt!: Date | null;
+
+  /** BR-007: proyecto confidencial (solo equipo y administradores). */
+  @Field()
+  isConfidential!: boolean;
+
+  /** BR-006: banderas de investigacion sensible declaradas en el alta. */
+  @Field()
+  researchInvolvesHumans!: boolean;
+
+  @Field()
+  researchInvolvesAnimals!: boolean;
+
+  @Field()
+  usesSensitiveData!: boolean;
+
+  /** BR-012: certificacion de anonimizacion a nivel de proyecto. */
+  @Field()
+  anonymizationCertified!: boolean;
+
+  @Field(() => GraphQLISODateTime, { nullable: true })
+  anonymizationCertifiedAt!: Date | null;
+
+  /** BR-013: fechas de retencion y borrado seguro. */
+  @Field(() => GraphQLISODateTime, { nullable: true })
+  retentionDeleteAt!: Date | null;
+
+  @Field(() => GraphQLISODateTime, { nullable: true })
+  retentionNotifiedAt!: Date | null;
+
+  @Field(() => GraphQLISODateTime, { nullable: true })
+  retentionDeletedAt!: Date | null;
+
+  /** F1-02: fecha del ultimo cambio de estado. */
+  @Field(() => GraphQLISODateTime)
+  statusChangedAt!: Date;
 }
 
 @InputType()
@@ -105,4 +140,33 @@ export class RegisterProjectInput {
 
   @Field(() => Int, { nullable: true })
   callId?: number | null;
+
+  /** BR-006: banderas de investigacion sensible. */
+  @Field(() => Boolean, { nullable: true })
+  researchInvolvesHumans?: boolean;
+
+  @Field(() => Boolean, { nullable: true })
+  researchInvolvesAnimals?: boolean;
+
+  @Field(() => Boolean, { nullable: true })
+  usesSensitiveData?: boolean;
+
+  /** BR-007: proyecto confidencial. */
+  @Field(() => Boolean, { nullable: true })
+  isConfidential?: boolean;
+}
+
+@InputType()
+export class UpdateProjectSettingsInput {
+  @Field(() => Boolean, { nullable: true })
+  isConfidential?: boolean;
+
+  @Field(() => Boolean, { nullable: true })
+  researchInvolvesHumans?: boolean;
+
+  @Field(() => Boolean, { nullable: true })
+  researchInvolvesAnimals?: boolean;
+
+  @Field(() => Boolean, { nullable: true })
+  usesSensitiveData?: boolean;
 }

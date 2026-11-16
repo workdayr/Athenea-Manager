@@ -32,15 +32,23 @@ const { state, prismaMock } = vi.hoisted(() => {
     conflicts: ConflictState[];
     evaluations: Record<string, unknown>[];
     audits: Record<string, unknown>[];
+    notifications: Record<string, unknown>[];
+    emails: Record<string, unknown>[];
     nextConflictId: number;
     nextEvaluationId: number;
+    nextNotificationId: number;
+    nextTransitionId: number;
   } = {
     projects: [],
     conflicts: [],
     evaluations: [],
     audits: [],
+    notifications: [],
+    emails: [],
     nextConflictId: 1,
     nextEvaluationId: 1,
+    nextNotificationId: 1,
+    nextTransitionId: 1,
   };
 
   const matchesReviewer = (c: ConflictState, reviewerId: string) =>
@@ -71,6 +79,28 @@ const { state, prismaMock } = vi.hoisted(() => {
         }
         return project;
       },
+      updateMany: async (args: {
+        where: { project_id: number; status: string };
+        data: { status: string };
+      }) => {
+        const project = state.projects.find(
+          (p) =>
+            p.project_id === args.where.project_id &&
+            p.status === args.where.status,
+        );
+        if (!project) {
+          return { count: 0 };
+        }
+        project.status = args.data.status;
+        return { count: 1 };
+      },
+    },
+    project_Status_Transition: {
+      create: async (args: { data: Record<string, unknown> }) => ({
+        transition_id: state.nextTransitionId++,
+        created_at: new Date(),
+        ...args.data,
+      }),
     },
     audit_Log: {
       create: async (args: { data: Record<string, unknown> }) => {
@@ -78,9 +108,39 @@ const { state, prismaMock } = vi.hoisted(() => {
         return args.data;
       },
     },
+    user: {
+      findUnique: async (args: { where: { id: string } }) => ({
+        id: args.where.id,
+        email: `${args.where.id}@unipolidgo.edu.mx`,
+      }),
+    },
+    notification: {
+      create: async (args: { data: Record<string, unknown> }) => {
+        const row = {
+          notification_id: state.nextNotificationId++,
+          ...args.data,
+        };
+        state.notifications.push(row);
+        return row;
+      },
+    },
+    email_Outbox: {
+      create: async (args: { data: Record<string, unknown> }) => {
+        state.emails.push(args.data);
+        return args.data;
+      },
+    },
+    // F1-10: el dictamen pendiente entra en la misma transaccion.
+    decision_Report: {
+      create: async () => ({ report_id: state.nextEvaluationId }),
+    },
   };
 
   const prismaMock = {
+    // F1-10 / BR-004: sin departamento declarado no hay conflicto.
+    user: {
+      findUnique: async () => ({ department: null }),
+    },
     project: {
       findMany: async () =>
         state.projects.map((p) => ({
@@ -298,6 +358,9 @@ describe('submitProjectDecision (RF-019, RF-003)', () => {
     state.conflicts = [];
     state.evaluations = [];
     state.audits = [];
+    state.notifications = [];
+    state.emails = [];
+    state.nextNotificationId = 1;
     seedProject();
   });
 
@@ -350,6 +413,13 @@ describe('submitProjectDecision (RF-019, RF-003)', () => {
     expect(state.audits[0]).toMatchObject({
       action: 'submit_project_decision:Proposed->Approved',
     });
+    // RF-014: el PI recibe notificacion in-app y correo encolado.
+    expect(state.notifications).toHaveLength(1);
+    expect(state.notifications[0]).toMatchObject({
+      user_id: 'pi-1',
+      type: 'Decision',
+    });
+    expect(state.emails).toHaveLength(1);
   });
 
   it('Revision_Required reusa Under_Review', async () => {

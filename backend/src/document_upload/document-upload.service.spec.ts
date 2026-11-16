@@ -8,6 +8,7 @@ import {
 
 vi.mock('../db/prisma.js', () => ({
   prisma: {
+    $transaction: vi.fn(),
     project_User: { findFirst: vi.fn() },
     project: { findUnique: vi.fn() },
     projectDocument: {
@@ -41,10 +42,13 @@ const projectRow = {
   project_id: 1,
   title: 'Proyecto equipo',
   status: 'Proposed',
-} as unknown;
+};
 
 beforeEach(() => {
   vi.resetAllMocks();
+  (prisma.$transaction as any).mockImplementation(
+    async (fn: (tx: typeof prisma) => unknown) => fn(prisma),
+  );
   (prisma.project_User.findFirst as any).mockResolvedValue({
     projectuser_id: 1,
     project_id: 1,
@@ -113,6 +117,44 @@ describe('uploadEvidenceDocument (RF-016, RNF-005)', () => {
       code: DOCUMENT_ERROR_CODES.CONFLICT,
       httpStatus: 409,
     });
+  });
+
+  it('rechaza evidencia en Draft: aun no esta abierto', async () => {
+    (prisma.project.findUnique as any).mockResolvedValue({
+      ...projectRow,
+      status: 'Draft',
+    });
+    await expect(
+      uploadEvidenceDocument(user, 1, validFile, '10.0.0.1'),
+    ).rejects.toMatchObject({
+      code: DOCUMENT_ERROR_CODES.CONFLICT,
+      httpStatus: 409,
+    });
+    expect(prisma.projectDocument.create).not.toHaveBeenCalled();
+  });
+
+  it('BR-012: rechaza XLSX de proyecto con humanos sin certificacion', async () => {
+    (prisma.project.findUnique as any).mockResolvedValue({
+      ...projectRow,
+      status: 'Active',
+      research_involves_humans: true,
+      research_involves_animals: false,
+      uses_sensitive_data: false,
+      anonymization_certified: false,
+    });
+    const xlsx = {
+      buffer: Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+      originalname: 'datos.xlsx',
+      size: 100,
+    };
+
+    await expect(
+      uploadEvidenceDocument(user, 1, xlsx, '10.0.0.1'),
+    ).rejects.toMatchObject({
+      code: DOCUMENT_ERROR_CODES.ANONYMIZATION_CERTIFICATION_REQUIRED,
+      httpStatus: 409,
+    });
+    expect(prisma.projectDocument.create).not.toHaveBeenCalled();
   });
 
   it('rechaza proyecto archivado en solo lectura (RF-020)', async () => {
@@ -215,5 +257,22 @@ describe('uploadEvidenceDocument (RF-016, RNF-005)', () => {
         source_ip: '10.0.0.2',
       },
     });
+  });
+
+  it('vincula la evidencia al hito dentro de la transaccion (RF-006)', async () => {
+    await uploadEvidenceDocument(user, 1, validFile, '10.0.0.3', {
+      milestoneId: 42,
+    });
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.projectDocument.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ milestone_id: 42 }),
+    });
+  });
+
+  it('documento y auditoria se escriben en la misma transaccion', async () => {
+    await uploadEvidenceDocument(user, 1, validFile, '10.0.0.4');
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.projectDocument.create).toHaveBeenCalled();
+    expect(prisma.audit_Log.create).toHaveBeenCalled();
   });
 });

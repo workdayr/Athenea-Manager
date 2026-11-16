@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { prisma } from '../db/prisma.js';
 import type { Prisma, ProjectStatus } from '../generated/prisma/client.js';
+import { confidentialProjectFilter } from '../projects/project-visibility.policy.js';
 import type { AuthenticatedUser } from '../projects/session.guard.js';
 import { TtlCache } from './reporting.cache.js';
 import {
@@ -144,7 +145,23 @@ function metricWhere(filters: NormalizedFilters): Prisma.ProjectWhereInput {
   };
 }
 
-function tableWhere(filters: NormalizedFilters): Prisma.ProjectWhereInput {
+/**
+ * BR-007: los listados institucionales ocultan proyectos confidenciales a
+ * quien no pertenece al equipo (salvo administradores generales). Se usa
+ * `AND` para no pisar el `OR` de la busqueda por titulo/PI.
+ */
+function withViewerVisibility(
+  where: Prisma.ProjectWhereInput,
+  user: AuthenticatedUser,
+): Prisma.ProjectWhereInput {
+  const filter = confidentialProjectFilter(user);
+  return filter ? { AND: [where, filter] } : where;
+}
+
+function tableWhere(
+  filters: NormalizedFilters,
+  user: AuthenticatedUser,
+): Prisma.ProjectWhereInput {
   const where: Prisma.ProjectWhereInput = { ...metricWhere(filters) };
   if (filters.statuses.length > 0) {
     where.status = { in: filters.statuses as ProjectStatus[] };
@@ -164,15 +181,18 @@ function tableWhere(filters: NormalizedFilters): Prisma.ProjectWhereInput {
       },
     ];
   }
-  return where;
+  return withViewerVisibility(where, user);
 }
 
-function reportWhere(filters: NormalizedFilters): Prisma.ProjectWhereInput {
+function reportWhere(
+  filters: NormalizedFilters,
+  user: AuthenticatedUser,
+): Prisma.ProjectWhereInput {
   const where: Prisma.ProjectWhereInput = { ...metricWhere(filters) };
   if (filters.statuses.length > 0) {
     where.status = { in: filters.statuses as ProjectStatus[] };
   }
-  return where;
+  return withViewerVisibility(where, user);
 }
 
 function delayedMilestoneWhere(
@@ -222,13 +242,16 @@ function statusCounts(
 
 function cacheKey(
   kind: string,
-  role: string,
+  user: AuthenticatedUser,
   filters: NormalizedFilters,
   extra = '',
 ): string {
+  // BR-007: el id del visor forma parte de la clave para que dos usuarios
+  // con el mismo rol no compartan proyectos confidenciales ajenos.
   return [
     kind,
-    role,
+    user.role,
+    user.id,
     filters.from.toISOString(),
     filters.to.toISOString(),
     filters.callId ?? 'all',
@@ -237,10 +260,10 @@ function cacheKey(
 }
 
 function tableCacheKey(
-  role: string,
+  user: AuthenticatedUser,
   filters: NormalizedFilters,
 ): string {
-  return cacheKey('table', role, filters, [
+  return cacheKey('table', user, filters, [
     filters.statuses.join(','),
     filters.search ?? '',
     filters.page,
@@ -482,14 +505,18 @@ export class ReportingService {
     const startedAt = Date.now();
 
     try {
-      const where = metricWhere(filters);
-      const metricsKey = cacheKey('metrics', user.role, filters);
+      const where = withViewerVisibility(metricWhere(filters), user);
+      const metricsKey = cacheKey('metrics', user, filters);
       const [metricsResult, tableResult, callsResult] = await Promise.all([
         this.metricsCache.getOrLoad(metricsKey, () =>
           computeMetrics(where, filters, includeBudget),
         ),
-        this.tableCache.getOrLoad(tableCacheKey(user.role, filters), () =>
-          computeTablePage(tableWhere(filters), filters.page, filters.pageSize),
+        this.tableCache.getOrLoad(tableCacheKey(user, filters), () =>
+          computeTablePage(
+            tableWhere(filters, user),
+            filters.page,
+            filters.pageSize,
+          ),
         ),
         this.callCache.getOrLoad('calls|all', computeCallOptions),
       ]);
@@ -539,12 +566,12 @@ export class ReportingService {
     try {
       const key = cacheKey(
         'metrics',
-        user.role,
+        user,
         filters,
         filters.statuses.join(','),
       );
       const result = await this.metricsCache.getOrLoad(key, () =>
-        computeMetrics(reportWhere(filters), filters, includeBudget),
+        computeMetrics(reportWhere(filters, user), filters, includeBudget),
       );
       return {
         metrics: result.value,

@@ -1,4 +1,6 @@
 import { gql } from '@apollo/client';
+import { getApolloClient } from './apollo-client';
+import { getStoredToken } from './auth-client';
 
 /**
  * Operaciones GraphQL del modulo proposal_evaluation (RF-019, BR-011).
@@ -71,6 +73,79 @@ export const SUBMIT_PROJECT_DECISION_MUTATION = gql`
     }
   }
 `;
+
+/* -------------------------------------------------------------------------- */
+/* F1-10 / RF-019: dictamen PDF asincrono                                      */
+/* -------------------------------------------------------------------------- */
+
+export type DecisionReportStatus = 'Pending' | 'Ready' | 'Failed';
+
+export interface DecisionReport {
+  reportId: number;
+  evaluationId: number;
+  status: DecisionReportStatus;
+  readyAt: string | null;
+  error: string | null;
+  attempts: number;
+}
+
+export const DECISION_REPORT_STATUS_QUERY = gql`
+  query DecisionReportStatus($evaluationId: Int!) {
+    decisionReportStatus(evaluationId: $evaluationId) {
+      reportId
+      evaluationId
+      status
+      readyAt
+      error
+      attempts
+    }
+  }
+`;
+
+export async function fetchDecisionReportStatus(
+  evaluationId: number,
+): Promise<DecisionReport> {
+  const result = await getApolloClient().query<{
+    decisionReportStatus: DecisionReport;
+  }>({
+    query: DECISION_REPORT_STATUS_QUERY,
+    variables: { evaluationId },
+    fetchPolicy: 'network-only',
+  });
+  const report = result.data?.decisionReportStatus;
+  if (!report) {
+    throw new Error('El servidor no devolvió el estado del dictamen.');
+  }
+  return report;
+}
+
+/** Descarga el PDF con Bearer y dispara la descarga del navegador. */
+export async function downloadDecisionReport(
+  evaluationId: number,
+): Promise<void> {
+  const response = await fetch(`/api/decisions/${evaluationId}/report`, {
+    headers: { Authorization: `Bearer ${getStoredToken()}` },
+  });
+  if (!response.ok) {
+    let message = 'No fue posible descargar el dictamen.';
+    try {
+      const body = (await response.json()) as { message?: string };
+      if (body.message) {
+        message = body.message;
+      }
+    } catch {
+      // Respuesta sin JSON: se conserva el mensaje generico.
+    }
+    throw new Error(message);
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `dictamen-${evaluationId}.pdf`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
 
 export const PENDING_CONFLICT_REVIEWS_QUERY = gql`
   query PendingConflictReviews {
@@ -180,6 +255,9 @@ export function blockReasonMessage(
   }
   if (blockReason === 'SELF_REVIEW') {
     return 'No puedes evaluar un proyecto de tu propio equipo (BR-004).';
+  }
+  if (blockReason === 'DEPARTMENT_CONFLICT') {
+    return 'No puedes evaluar un proyecto del mismo departamento que el Investigador Principal (BR-004).';
   }
   if (blockReason === 'INVALID_STATE') {
     return 'El proyecto ya no admite decisión en su estado actual.';

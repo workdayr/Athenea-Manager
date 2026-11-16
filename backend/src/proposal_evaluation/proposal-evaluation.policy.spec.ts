@@ -4,7 +4,9 @@ import {
   canEvaluateStatus,
   detectFamilyConflict,
   extractSurnames,
+  isSameDepartment,
   isSelfReview,
+  normalizeDepartment,
   normalizePersonName,
   statusAfterDecision,
   validateJustification,
@@ -86,6 +88,29 @@ describe('isSelfReview (BR-004 parcial)', () => {
   it('detecta al evaluador dentro del equipo', () => {
     expect(isSelfReview('u1', ['u2', 'u1'])).toBe(true);
     expect(isSelfReview('u1', ['u2', 'u3'])).toBe(false);
+  });
+});
+
+describe('isSameDepartment (BR-004 / F1-10)', () => {
+  it('normaliza acentos, mayusculas y espacios', () => {
+    expect(normalizeDepartment('  Ingeniería  en Sistemas ')).toBe(
+      'ingenieria en sistemas',
+    );
+  });
+
+  it('bloquea cuando ambos departamentos coinciden', () => {
+    expect(isSameDepartment('Ingeniería en Sistemas', 'ingenieria en sistemas')).toBe(
+      true,
+    );
+    expect(isSameDepartment('Ciencias Básicas', 'Ingeniería en Sistemas')).toBe(
+      false,
+    );
+  });
+
+  it('no bloquea si falta el departamento (D-02)', () => {
+    expect(isSameDepartment(null, 'Ingeniería')).toBe(false);
+    expect(isSameDepartment('Ingeniería', undefined)).toBe(false);
+    expect(isSameDepartment('   ', '   ')).toBe(false);
   });
 });
 

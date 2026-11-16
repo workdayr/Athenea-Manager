@@ -59,7 +59,7 @@ describe('Registro (RF-010, BR-005)', () => {
     expect(res.token).toBeDefined();
     expect(res.user.email).toBe('alumna@unipolidgo.edu.mx');
     // RF-001: rol por defecto STUDENT.
-    expect(res.user.role).toBe(DEFAULT_USER_ROLE);
+    expect((res.user as MemoryRow).role).toBe(DEFAULT_USER_ROLE);
 
     const row = await findUser(auth, 'alumna@unipolidgo.edu.mx');
     // RNF-006 / RF-010: bcrypt cost 12, nunca texto plano. El hash vive en
@@ -126,7 +126,7 @@ describe('Registro (RF-010, BR-005)', () => {
       },
     });
     // RF-001: el valor enviado se ignora y se aplica el rol por defecto.
-    expect(res.user.role).toBe(DEFAULT_USER_ROLE);
+    expect((res.user as MemoryRow).role).toBe(DEFAULT_USER_ROLE);
   });
 
   it('rechaza correos duplicados', async () => {
@@ -236,11 +236,14 @@ describe('Politica de dominios en creacion por cualquier via (RF-015)', () => {
     // `code` es lo que permite al callback redirigir con ?error= en lugar
     // de devolver el JSON crudo al navegador.
     const failure = await ctx.internalAdapter
-      .createUser({
-        name: 'Externo',
-        email: 'externo@gmail.com',
-        emailVerified: false,
-      })
+      .createUser(
+        {
+          name: 'Externo',
+          email: 'externo@gmail.com',
+          emailVerified: false,
+        },
+        { method: 'oauth', oauth: { providerId: 'google' } },
+      )
       .then(
         () => null,
         (error: unknown) => error,
@@ -257,11 +260,14 @@ describe('Politica de dominios en creacion por cualquier via (RF-015)', () => {
     try {
       const auth = createTestAuth();
       const ctx = await auth.$context;
-      const user = await ctx.internalAdapter.createUser({
-        name: 'Socio',
-        email: 'socio@socio.edu.mx',
-        emailVerified: true,
-      });
+      const user = await ctx.internalAdapter.createUser(
+        {
+          name: 'Socio',
+          email: 'socio@socio.edu.mx',
+          emailVerified: true,
+        },
+        { method: 'email-password' },
+      );
       expect(user?.email).toBe('socio@socio.edu.mx');
       expect((user as MemoryRow)?.role).toBe(DEFAULT_USER_ROLE);
     } finally {

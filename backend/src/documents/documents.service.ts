@@ -3,7 +3,17 @@ import type { Visibility } from '../generated/prisma/client.js';
 import { PROJECT_ERROR_CODES } from '../projects/projects.constants.js';
 import { assertProjectWritable } from '../projects/project-write-guard.js';
 import type { AuthenticatedUser } from '../projects/session.guard.js';
+import {
+  normalizePageArgs,
+  orderByFrom,
+  PAGINATION_MAX_PAGE_SIZE,
+  type PageArgs,
+} from '../common/pagination/pagination.policy.js';
 import { visibilityChangeAuditAction } from './documents.constants.js';
+import {
+  isReviewableDocument,
+  isReviewerRole,
+} from './document-review.policy.js';
 import {
   canManageVisibility,
   isInstitutionalRole,
@@ -37,9 +47,15 @@ export interface ProjectDocumentView {
   uploaded_at: Date;
   mandatory_review: boolean;
   can_change_visibility: boolean;
+  /** F1-11 / BR-003: estado de revision administrativa. */
+  review_status: string;
+  reviewed_at: Date | null;
+  reviewer_name: string | null;
+  review_notes: string | null;
+  can_review: boolean;
 }
 
-interface DocumentRow {
+export interface DocumentRow {
   document_id: number;
   project_id: number;
   doc_type: string;
@@ -48,6 +64,10 @@ interface DocumentRow {
   file_size: number | null;
   version: number;
   uploaded_at: Date;
+  review_status?: string;
+  reviewed_at?: Date | null;
+  review_notes?: string | null;
+  reviewer?: { name: string } | null;
 }
 
 function fail(
@@ -59,7 +79,11 @@ function fail(
   throw new DocumentVisibilityError(code, message, httpStatus, field);
 }
 
-function toView(row: DocumentRow, canChangeVisibility: boolean): ProjectDocumentView {
+export function toView(
+  row: DocumentRow,
+  canChangeVisibility: boolean,
+  canReview = false,
+): ProjectDocumentView {
   return {
     document_id: row.document_id,
     project_id: row.project_id,
@@ -71,7 +95,16 @@ function toView(row: DocumentRow, canChangeVisibility: boolean): ProjectDocument
     uploaded_at: row.uploaded_at,
     mandatory_review: isMandatoryReviewDocument(row.doc_type),
     can_change_visibility: canChangeVisibility,
+    review_status: row.review_status ?? 'Pending',
+    reviewed_at: row.reviewed_at ?? null,
+    reviewer_name: row.reviewer?.name ?? null,
+    review_notes: row.review_notes ?? null,
+    can_review: canReview && isReviewableDocument(row.doc_type),
   };
+}
+
+function canReviewFor(user: AuthenticatedUser, docType: string): boolean {
+  return isReviewerRole(user.role) && isReviewableDocument(docType);
 }
 
 function canChangeFor(
@@ -140,6 +173,7 @@ export async function setDocumentVisibility(
 
   const document = await prisma.projectDocument.findFirst({
     where: { document_id: documentId, project_id: projectId },
+    include: { reviewer: { select: { name: true } } },
   });
   if (!document) {
     fail(
@@ -163,12 +197,14 @@ export async function setDocumentVisibility(
     return toView(
       document as unknown as DocumentRow,
       canChangeFor(membership.project_role, String(project.status), String(document.doc_type)),
+      canReviewFor(user, String(document.doc_type)),
     );
   }
 
   const updated = await prisma.projectDocument.update({
     where: { document_id: documentId },
     data: { visibility: visibility as Visibility },
+    include: { reviewer: { select: { name: true } } },
   });
 
   // RF-017: toda configuracion de visibilidad queda auditada.
@@ -184,6 +220,7 @@ export async function setDocumentVisibility(
   return toView(
     updated as unknown as DocumentRow,
     canChangeFor(membership.project_role, String(project.status), String(updated.doc_type)),
+    canReviewFor(user, String(updated.doc_type)),
   );
 }
 
@@ -199,6 +236,7 @@ export async function setDocumentVisibility(
 export async function listProjectDocuments(
   user: AuthenticatedUser,
   projectId: number,
+  paging: PageArgs = {},
 ): Promise<ProjectDocumentView[]> {
   const project = await prisma.project.findUnique({
     where: { project_id: projectId },
@@ -220,6 +258,12 @@ export async function listProjectDocuments(
     );
   }
 
+  // F2-03 / RF-013: paginacion y orden del lado del servidor.
+  const ordering = normalizePageArgs(
+    { ...paging, pageSize: paging.pageSize ?? PAGINATION_MAX_PAGE_SIZE },
+    ['uploadedAt', 'docType', 'version'],
+    { sortBy: 'uploadedAt', sortDir: 'desc' },
+  );
   const documents = await prisma.projectDocument.findMany({
     where: {
       project_id: projectId,
@@ -227,7 +271,15 @@ export async function listProjectDocuments(
         ? {}
         : { visibility: 'Shared_with_administration' as Visibility }),
     },
-    orderBy: { uploaded_at: 'desc' },
+    orderBy:
+      orderByFrom(ordering, {
+        uploadedAt: 'uploaded_at',
+        docType: 'doc_type',
+        version: 'version',
+      }) ?? { uploaded_at: 'desc' },
+    skip: ordering.skip,
+    take: ordering.take,
+    include: { reviewer: { select: { name: true } } },
   });
 
   return (documents as unknown as DocumentRow[]).map((row) =>
@@ -240,6 +292,7 @@ export async function listProjectDocuments(
             row.doc_type,
           )
         : false,
+      canReviewFor(user, row.doc_type),
     ),
   );
 }

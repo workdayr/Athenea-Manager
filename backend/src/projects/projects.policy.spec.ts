@@ -56,7 +56,8 @@ describe('limite BR-002', () => {
     expect(remainingProjectSlots(2)).toBe(1);
   });
 
-  it('solo Proposed/Under_Review/Approved/Active cuentan como activos', () => {
+  it('Draft/Proposed/Under_Review/Approved/Active cuentan como activos', () => {
+    expect(isActiveProjectStatus('Draft')).toBe(true);
     expect(isActiveProjectStatus('Proposed')).toBe(true);
     expect(isActiveProjectStatus('Active')).toBe(true);
     expect(isActiveProjectStatus('Closed')).toBe(false);

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, type FormEvent } from 'react';
+import { useToast } from '@/components/ui/toast-provider';
 import { authClient } from '@/lib/auth-client';
 import { mapAuthError, mapOAuthCallbackError } from '@/lib/auth-errors';
 
@@ -22,9 +23,9 @@ export function LoginForm({
   initialOAuthError: string | null;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   // Descarta el banner de ?error= cuando el usuario interactua.
@@ -34,7 +35,7 @@ export function LoginForm({
   // usuario. Al no guardarlo en state, las navegaciones client-side que
   // cambien ?error= tambien se reflejan.
   const oauthError = dismissed ? null : initialOAuthError;
-  const displayError = error ?? mapOAuthCallbackError(oauthError);
+  const displayError = mapOAuthCallbackError(oauthError);
 
   // El callback OAuth redirige aqui con ?error=... cuando algo falla.
   // Solo limpia la URL (sistema externo); el mensaje ya llego por props.
@@ -46,10 +47,9 @@ export function LoginForm({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
     setDismissed(true);
     if (password.length < 8 || password.length > 64) {
-      setError('La contraseña debe tener entre 8 y 64 caracteres.');
+      toast.error('La contraseña debe tener entre 8 y 64 caracteres.');
       return;
     }
     setLoading(true);
@@ -59,19 +59,20 @@ export function LoginForm({
     });
     setLoading(false);
     if (signInError) {
-      setError(
+      toast.error(
         mapAuthError(
           signInError,
           'No fue posible iniciar sesión. Intenta de nuevo.',
         ),
+        'No se pudo iniciar sesión',
       );
       return;
     }
+    toast.success('Sesión iniciada. Redirigiendo al panel…');
     router.push('/dashboard');
   }
 
   async function handleGoogleSignIn() {
-    setError(null);
     setDismissed(true);
     setGoogleLoading(true);
     const { error: socialError } = await authClient.signIn.social({
@@ -81,11 +82,12 @@ export function LoginForm({
     });
     setGoogleLoading(false);
     if (socialError) {
-      setError(
+      toast.error(
         mapAuthError(
           socialError,
           'El inicio con Google no está disponible por el momento. Usa tu correo y contraseña.',
         ),
+        'No se pudo continuar con Google',
       );
     }
     // Sin error el cliente redirige solo a Google.
@@ -126,12 +128,20 @@ export function LoginForm({
               </div>
 
               <div>
-                <label
-                  htmlFor="password"
-                  className="mb-1 block text-sm font-medium text-gray-700"
-                >
-                  Contraseña
-                </label>
+                <div className="mb-1 flex items-baseline justify-between">
+                  <label
+                    htmlFor="password"
+                    className="block text-sm font-medium text-gray-700"
+                  >
+                    Contraseña
+                  </label>
+                  <Link
+                    href="/forgot-password"
+                    className="text-xs font-medium text-blue-600 hover:underline"
+                  >
+                    ¿Olvidaste tu contraseña?
+                  </Link>
+                </div>
                 <input
                   id="password"
                   name="password"
@@ -181,6 +191,16 @@ export function LoginForm({
           ¿No tienes cuenta?{' '}
           <Link href="/register" className="font-medium text-blue-600 hover:underline">
             Regístrate
+          </Link>
+        </p>
+
+        <p className="mt-2 text-center text-sm text-gray-600">
+          ¿Aún no verificas tu correo?{' '}
+          <Link
+            href="/verify-email"
+            className="font-medium text-blue-600 hover:underline"
+          >
+            Reenviar verificación
           </Link>
         </p>
       </section>

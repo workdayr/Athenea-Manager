@@ -1,4 +1,5 @@
 import { gql } from '@apollo/client';
+import { getStoredToken } from './auth-client';
 import {
   STATUS_LABELS,
   formatCurrency,
@@ -85,6 +86,55 @@ export const COORDINATOR_DASHBOARD_QUERY = gql`
     }
   }
 `;
+
+/** F2-05 / RF-008: descarga del reporte exportado por el servidor. */
+export type ReportExportFormat = 'csv' | 'pdf';
+
+export function reportExportQuery(
+  filters: ReportFiltersInput,
+  format: ReportExportFormat,
+): string {
+  const params = new URLSearchParams();
+  if (filters.year) params.set('year', String(filters.year));
+  if (filters.from) params.set('from', String(filters.from));
+  if (filters.to) params.set('to', String(filters.to));
+  if (filters.callId) params.set('callId', String(filters.callId));
+  if (filters.search) params.set('search', filters.search);
+  if (filters.statuses?.length) {
+    params.set('statuses', filters.statuses.join(','));
+  }
+  params.set('format', format);
+  return params.toString();
+}
+
+export async function downloadCoordinatorReport(
+  filters: ReportFiltersInput,
+  format: ReportExportFormat,
+): Promise<void> {
+  const query = reportExportQuery(filters, format);
+  const response = await fetch(`/api/reports/coordinator/export?${query}`, {
+    headers: { Authorization: `Bearer ${getStoredToken()}` },
+  });
+  if (!response.ok) {
+    let message = 'No fue posible exportar el reporte.';
+    try {
+      const body = (await response.json()) as { message?: string };
+      if (body.message) {
+        message = body.message;
+      }
+    } catch {
+      // Respuesta sin JSON: se conserva el mensaje generico.
+    }
+    throw new Error(message);
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `athenea-informe-${filters.year ?? ''}.${format}`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
 
 export interface ReportFiltersInput {
   year?: number;

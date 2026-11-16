@@ -11,6 +11,7 @@ import { GraphQLError } from 'graphql';
 import { ROLES } from '../auth/roles.constants.js';
 import { Roles } from '../auth/roles.decorator.js';
 import { RolesGuard } from '../auth/roles.guard.js';
+import { SortDirectionGql } from '../common/pagination/pagination.model.js';
 import { CurrentUser } from '../projects/current-user.decorator.js';
 import { ProjectReadOnlyError } from '../projects/project-write-guard.js';
 import {
@@ -18,6 +19,7 @@ import {
   type AuthenticatedUser,
 } from '../projects/session.guard.js';
 import {
+  DocumentReviewStatusGql,
   DocumentVisibilityGql,
   ProjectDocumentGql,
 } from './documents.model.js';
@@ -28,7 +30,7 @@ import {
   type ProjectDocumentView,
 } from './documents.service.js';
 
-function toGql(row: ProjectDocumentView): ProjectDocumentGql {
+export function toDocumentGql(row: ProjectDocumentView): ProjectDocumentGql {
   const document = new ProjectDocumentGql();
   document.documentId = row.document_id;
   document.projectId = row.project_id;
@@ -40,6 +42,11 @@ function toGql(row: ProjectDocumentView): ProjectDocumentGql {
   document.uploadedAt = row.uploaded_at;
   document.mandatoryReview = row.mandatory_review;
   document.canChangeVisibility = row.can_change_visibility;
+  document.reviewStatus = row.review_status as DocumentReviewStatusGql;
+  document.reviewedAt = row.reviewed_at;
+  document.reviewerName = row.reviewer_name;
+  document.reviewNotes = row.review_notes;
+  document.canReview = row.can_review;
   return document;
 }
 
@@ -76,7 +83,7 @@ export class DocumentsResolver {
     @Context() context: { req?: { ip?: string } },
   ): Promise<ProjectDocumentGql> {
     try {
-      return toGql(
+      return toDocumentGql(
         await setDocumentVisibility(
           user,
           projectId,
@@ -94,10 +101,20 @@ export class DocumentsResolver {
   async projectDocuments(
     @Args('projectId', { type: () => Int }) projectId: number,
     @CurrentUser() user: AuthenticatedUser,
+    @Args('page', { type: () => Int, nullable: true }) page?: number,
+    @Args('pageSize', { type: () => Int, nullable: true }) pageSize?: number,
+    @Args('sortBy', { type: () => String, nullable: true }) sortBy?: string,
+    @Args('sortDir', { type: () => SortDirectionGql, nullable: true })
+    sortDir?: SortDirectionGql,
   ): Promise<ProjectDocumentGql[]> {
     try {
-      const rows = await listProjectDocuments(user, projectId);
-      return rows.map(toGql);
+      const rows = await listProjectDocuments(user, projectId, {
+        page,
+        pageSize,
+        sortBy,
+        sortDir,
+      });
+      return rows.map(toDocumentGql);
     } catch (error) {
       toGraphQLError(error);
     }

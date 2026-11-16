@@ -1,10 +1,15 @@
 import { prisma } from '../db/prisma.js';
+import { notifyUser } from '../notifications/notifications.service.js';
+import { isTransitionAllowed } from '../projects/project-lifecycle.policy.js';
+import {
+  applyStatusTransition,
+  assertTransitionConditions,
+} from '../projects/project-lifecycle.service.js';
 import { getProjectWithTeamForEvaluation } from '../projects/projects.service.js';
 import type { AuthenticatedUser } from '../projects/session.guard.js';
 import type {
   ConflictStatus,
   EvaluationDecision,
-  ProjectStatus,
 } from '../generated/prisma/client.js';
 import {
   EVALUABLE_STATUSES,
@@ -19,10 +24,12 @@ import {
 import {
   canEvaluateStatus,
   detectFamilyConflict,
+  isSameDepartment,
   isSelfReview,
   statusAfterDecision,
   validateJustification,
 } from './proposal-evaluation.policy.js';
+import { createPendingDecisionReport } from './decision-report.service.js';
 
 /** Error de dominio: se mapea a GraphQL (extensions.code/field). */
 export class EvaluationError extends Error {
@@ -80,7 +87,12 @@ function requireAdmin(user: AuthenticatedUser): void {
 
 interface TeamRow {
   user_id: string;
-  user: { id: string; name: string; email: string };
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    department?: string | null;
+  };
   project_role: string;
 }
 
@@ -102,6 +114,9 @@ interface ProjectRow {
   start_date: Date;
   end_date: Date;
   status: string;
+  research_involves_humans: boolean;
+  research_involves_animals: boolean;
+  uses_sensitive_data: boolean;
   projectUsers: TeamRow[];
 }
 
@@ -111,6 +126,25 @@ function teamNames(project: Pick<ProjectRow, 'projectUsers'>): string[] {
 
 function teamIds(project: Pick<ProjectRow, 'projectUsers'>): string[] {
   return project.projectUsers.map((member) => member.user_id);
+}
+
+function principalInvestigator(
+  project: Pick<ProjectRow, 'projectUsers'>,
+): TeamRow | undefined {
+  return project.projectUsers.find(
+    (member) => member.project_role === 'Principal_Investigator',
+  );
+}
+
+/** BR-004: departamento del evaluador y del PI (D-02: origen a confirmar). */
+async function reviewerDepartment(
+  reviewerId: string,
+): Promise<string | null> {
+  const reviewer = await prisma.user.findUnique({
+    where: { id: reviewerId },
+    select: { department: true },
+  });
+  return reviewer?.department ?? null;
 }
 
 /**
@@ -231,17 +265,24 @@ export async function proposalContext(
     });
   }
   const self = isSelfReview(viewer.id, teamIds(row));
+  const departmentConflict = isSameDepartment(
+    await reviewerDepartment(viewer.id),
+    principalInvestigator(row)?.user.department,
+  );
   const blocked =
     !canEvaluateStatus(row.status) ||
     self ||
+    departmentConflict ||
     (conflict !== null && conflict.status !== 'Cleared');
   const blockReason = !canEvaluateStatus(row.status)
     ? EVALUATION_ERROR_CODES.INVALID_STATE
     : self
       ? EVALUATION_ERROR_CODES.SELF_REVIEW
-      : conflict !== null && conflict.status !== 'Cleared'
-        ? EVALUATION_ERROR_CODES.FAMILY_CONFLICT
-        : null;
+      : departmentConflict
+        ? EVALUATION_ERROR_CODES.DEPARTMENT_CONFLICT
+        : conflict !== null && conflict.status !== 'Cleared'
+          ? EVALUATION_ERROR_CODES.FAMILY_CONFLICT
+          : null;
   return {
     project_id: row.project_id,
     title: row.title,
@@ -326,6 +367,22 @@ const row = (await getProjectWithTeamForEvaluation(data.projectId)) as unknown a
       403,
     );
   }
+  // F1-10 / BR-004: tampoco puede evaluar un proyecto cuyo PI pertenece a
+  // su mismo departamento academico.
+  const piMember = principalInvestigator(row);
+  if (
+    piMember &&
+    isSameDepartment(
+      await reviewerDepartment(viewer.id),
+      piMember.user.department,
+    )
+  ) {
+    fail(
+      EVALUATION_ERROR_CODES.DEPARTMENT_CONFLICT,
+      'No puedes evaluar un proyecto del mismo departamento que el Investigador Principal (BR-004).',
+      403,
+    );
+  }
   const matched = detectFamilyConflict(viewer.name, teamNames(row));
   const existing = (await prisma.review_Conflict.findFirst({
     where: { project_id: data.projectId, reviewer_id: viewer.id },
@@ -367,6 +424,18 @@ const row = (await getProjectWithTeamForEvaluation(data.projectId)) as unknown a
   const to = statusAfterDecision(
     data.decision as (typeof EVALUATION_DECISIONS)[number],
   );
+
+  // F1-02: la decision debe ser una transicion valida de la maquina de
+  // estados y cumplir las compuertas BR-006 (etica) antes de registrarse.
+  if (!isTransitionAllowed(from, to)) {
+    fail(
+      EVALUATION_ERROR_CODES.INVALID_STATE,
+      `La decision no puede aplicarse desde el estado ${from} (RF-003).`,
+      409,
+    );
+  }
+  await assertTransitionConditions(row, to);
+
   return prisma.$transaction(async (tx) => {
     const evaluation = await tx.proposal_Evaluation.create({
       data: {
@@ -376,11 +445,39 @@ const row = (await getProjectWithTeamForEvaluation(data.projectId)) as unknown a
         justification: data.justification.trim(),
       },
     });
-    await tx.project.update({
-      where: { project_id: data.projectId },
-      data: { status: to as ProjectStatus },
+    // F1-10 / RF-019: el dictamen nace pendiente en la MISMA transaccion;
+    // el worker in-process lo genera despues sin bloquear la respuesta.
+    await createPendingDecisionReport(tx, evaluation.evaluation_id);
+    // F1-02: el historial y el SLA se actualizan en la misma transaccion.
+    const applied = await applyStatusTransition(tx, {
+      projectId: data.projectId,
+      actorId: viewer.id,
+      from,
+      to,
+      justification: data.justification,
     });
-    console.log(`[EMAIL MOCK] Notificando al PI que el proyecto ${data.projectId} ha sido evaluado como: ${data.decision}`);
+    if (!applied.applied) {
+      fail(
+        EVALUATION_ERROR_CODES.INVALID_STATE,
+        'El proyecto cambio de estado durante la operacion. Recarga e intenta de nuevo.',
+        409,
+      );
+    }
+    // RF-014: la notificacion y su correo entran en la misma transaccion
+    // que la decision. El job de outbox los envia despues.
+    const pi = row.projectUsers.find(
+      (member) => member.project_role === 'Principal_Investigator',
+    );
+    if (pi) {
+      await notifyUser(tx, pi.user_id, {
+        type: 'Decision',
+        title: 'Decision del comite evaluador',
+        message:
+          `Tu proyecto "${row.title}" fue evaluado con la decision ` +
+          `${data.decision}. Nuevo estado: ${to}.`,
+        link: `/projects/${data.projectId}/documents`,
+      });
+    }
     await tx.audit_Log.create({
       data: {
         actor_id: viewer.id,

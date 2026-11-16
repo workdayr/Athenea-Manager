@@ -29,6 +29,7 @@ import {
 } from '@/lib/dashboard';
 import {
   documentTypeLabel,
+  downloadProjectDocument,
   fetchProjectDocuments,
   formatFileSize,
   type ProjectDocument,
@@ -951,6 +952,7 @@ function mapRealProject(
 function mapProjectDocument(document: ProjectDocument): DashboardDocument {
   return {
     id: `DOC-${document.documentId}`,
+    documentId: document.documentId,
     name: document.fileName ?? `Documento #${document.documentId}`,
     type: documentTypeLabel(document.docType),
     size: formatFileSize(document.fileSize),
@@ -1153,9 +1155,18 @@ function DocumentRow({ document }: { document: DashboardDocument }) {
       <td className="px-5 py-3 text-right">
         <button
           type="button"
-          disabled
-          title="La descarga se habilita al integrar el repositorio documental (RF-005)"
-          className="inline-flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-[10.5px] font-medium text-muted disabled:cursor-not-allowed disabled:opacity-60"
+          onClick={async () => {
+            if (document.documentId) {
+              try {
+                await downloadProjectDocument(document.documentId);
+              } catch (e) {
+                alert(e instanceof Error ? e.message : 'Error al descargar documento.');
+              }
+            }
+          }}
+          disabled={!document.documentId}
+          title="Descargar documento (RNF-005)"
+          className="inline-flex items-center gap-1.5 rounded-md border border-line bg-white px-2.5 py-1 text-[10.5px] font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <Icon name="download" className="h-3.5 w-3.5" />
           Descargar

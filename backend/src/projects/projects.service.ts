@@ -1,8 +1,11 @@
 import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
+import { ROLES } from '../auth/roles.constants.js';
 import { submitProposalToCall } from '../calls/calls.service.js';
 import { prisma } from '../db/prisma.js';
-import type { DocType } from '../generated/prisma/client.js';
+import type { DocType, Prisma } from '../generated/prisma/client.js';
+import { applyStatusTransition } from './project-lifecycle.service.js';
+import { canViewConfidentialProject } from './project-visibility.policy.js';
 import {
   ACTIVE_PROJECT_STATUSES,
   PROJECT_ERROR_CODES,
@@ -16,6 +19,12 @@ import {
   validateRegisterProjectInput,
 } from './projects.policy.js';
 import { assertProjectWritable } from './project-write-guard.js';
+import {
+  normalizePageArgs,
+  orderByFrom,
+  PAGINATION_MAX_PAGE_SIZE,
+  type PageArgs,
+} from '../common/pagination/pagination.policy.js';
 import type { AuthenticatedUser } from './session.guard.js';
 
 /** Error de dominio: se mapea a GraphQL (extensions.code) o a HTTP. */
@@ -36,20 +45,24 @@ export interface RegisterProjectData {
   startDate: Date;
   endDate: Date;
   callId?: number | null;
+  researchInvolvesHumans?: boolean;
+  researchInvolvesAnimals?: boolean;
+  usesSensitiveData?: boolean;
+  isConfidential?: boolean;
 }
 
-const fail = (
+function fail(
   code: string,
   message: string,
   httpStatus: number,
   field?: string,
-): never => {
+): never {
   throw new ProjectError(code, message, httpStatus, field);
-};
+}
 
 /**
- * US 2.1 / RF-002: registra el proyecto en estado Proposed con el
- * solicitante como PI. Aplica BR-001 (rol) y BR-002 (tope de 3 activos).
+ * US 2.1 / RF-002: registra el proyecto en estado Draft con el solicitante
+ * como PI. Aplica BR-001 (rol) y BR-002 (tope de 3 activos).
  */
 export async function registerProject(
   user: AuthenticatedUser,
@@ -93,6 +106,10 @@ export async function registerProject(
       startDate: data.startDate,
       endDate: data.endDate,
       callId: data.callId,
+      researchInvolvesHumans: data.researchInvolvesHumans,
+      researchInvolvesAnimals: data.researchInvolvesAnimals,
+      usesSensitiveData: data.usesSensitiveData,
+      isConfidential: data.isConfidential,
     });
     return result;
   }
@@ -119,8 +136,11 @@ export async function registerProject(
       start_date: data.startDate,
       end_date: data.endDate,
       call_id: data.callId ?? null,
-      is_confidential: false,
-      status: 'Draft', 
+      is_confidential: data.isConfidential === true,
+      research_involves_humans: data.researchInvolvesHumans === true,
+      research_involves_animals: data.researchInvolvesAnimals === true,
+      uses_sensitive_data: data.usesSensitiveData === true,
+      status: 'Draft',
       projectUsers: {
         create: { user_id: user.id, project_role: 'Principal_Investigator' },
       },
@@ -140,10 +160,27 @@ export async function registerProject(
 }
 
 /** Proyectos donde el usuario es miembro (para "Mis proyectos" y el cupo). */
-export function myProjects(user: AuthenticatedUser) {
+export function myProjects(
+  user: AuthenticatedUser,
+  paging: PageArgs = {},
+) {
+  // F2-03 / RF-013: paginacion y ordenamiento del lado del servidor.
+  const ordering = normalizePageArgs(
+    { ...paging, pageSize: paging.pageSize ?? PAGINATION_MAX_PAGE_SIZE },
+    ['projectId', 'title', 'status', 'startDate'],
+    { sortBy: 'projectId', sortDir: 'desc' },
+  );
   return prisma.project.findMany({
     where: { projectUsers: { some: { user_id: user.id } } },
-    orderBy: { project_id: 'desc' },
+    orderBy:
+      orderByFrom(ordering, {
+        projectId: 'project_id',
+        title: 'title',
+        status: 'status',
+        startDate: 'start_date',
+      }) ?? { project_id: 'desc' },
+    skip: ordering.skip,
+    take: ordering.take,
     include: {
       call: { select: { title: true } },
       projectUsers: {
@@ -180,29 +217,31 @@ function uploadBaseDir(): string {
 }
 
 /**
- * RF-002 + RF-016: adjunta uno de los 5 documentos obligatorios al proyecto
- * en estado Proposed. Valida PDF por Magic Numbers, 25 MB/archivo y
- * cuota de 500 MB/proyecto. Un archivo por tipo documental.
- */
-/**
- * RF-002 + RF-016: adjunta uno de los 5 documentos obligatorios al proyecto
- * Valida PDF por Magic Numbers, 25 MB/archivo y cuota de 500 MB/proyecto. 
- * Un archivo por tipo documental.
+ * RF-002 + RF-016: adjunta los 5 documentos obligatorios en Draft y la
+ * aprobacion de etica (BR-006) antes de la aprobacion del proyecto.
+ *
+ * Valida PDF por Magic Numbers, 25 MB/archivo y cuota de 500 MB/proyecto.
+ * Al completar los 5 obligatorios, transiciona Draft -> Proposed en la
+ * misma transaccion que crea el documento.
  */
 export async function uploadProjectDocument(
   user: AuthenticatedUser,
   projectId: number,
   docType: string,
   file: UploadedFile,
+  ip = 'unknown',
 ) {
-  if (!isRequiredDocumentType(docType)) {
+  const isRequired = isRequiredDocumentType(docType);
+  const isEthicsApproval = docType === 'ethics_approval';
+  if (!isRequired && !isEthicsApproval) {
     fail(
       PROJECT_ERROR_CODES.VALIDATION_ERROR,
-      `Tipo documental invalido. Requeridos: ${REQUIRED_DOCUMENT_TYPES.join(', ')}.`,
+      `Tipo documental invalido. Requeridos: ${REQUIRED_DOCUMENT_TYPES.join(', ')} o ethics_approval.`,
       400,
       'docType',
     );
   }
+
   const project = await prisma.project.findUnique({
     where: { project_id: projectId },
   });
@@ -227,8 +266,16 @@ export async function uploadProjectDocument(
   // RF-020: el archivo institucional es inmutable.
   assertProjectWritable(project as { is_read_only?: boolean | null });
 
-  // 🚨 CORRECCIÓN (Obs 8): Ahora el proyecto nace en 'Draft', no en 'Proposed'
-  if ((project as { status: string }).status !== 'Draft') {
+  const status = (project as { status: string }).status;
+  if (isEthicsApproval) {
+    if (!['Draft', 'Proposed', 'Under_Review'].includes(status)) {
+      fail(
+        PROJECT_ERROR_CODES.CONFLICT,
+        'La aprobacion de etica solo puede cargarse antes de que el proyecto sea aprobado.',
+        409,
+      );
+    }
+  } else if (status !== 'Draft') {
     fail(
       PROJECT_ERROR_CODES.CONFLICT,
       'El proyecto ya no acepta documentos de registro (debe estar en Draft).',
@@ -271,6 +318,7 @@ export async function uploadProjectDocument(
       'file',
     );
   }
+
   const dir = join(uploadBaseDir(), 'projects', String(projectId));
   await mkdir(dir, { recursive: true });
   const fileName = `${docType}_v1_${Date.now()}.pdf`;
@@ -278,39 +326,68 @@ export async function uploadProjectDocument(
   await writeFile(absolutePath, file.buffer);
 
   try {
-    const createdDoc = await prisma.projectDocument.create({
-      data: {
-        project_id: projectId,
-        doc_type: docType as DocType,
-        visibility: 'Shared_with_administration',
-        file_url: absolutePath.split(sep).join('/'),
-        version: 1,
-        file_name: file.originalname,
-        file_size: file.size,
-      },
-    });
-
-    // 🚨 NUEVO (Obs 8): Si ya hay 5 documentos, pasa a Proposed
-    const docCount = await prisma.projectDocument.count({
-      where: { project_id: projectId },
-    });
-    
-    if (docCount >= 5) {
-      await prisma.project.update({
-        where: { project_id: projectId },
-        data: { status: 'Proposed' },
+    return await prisma.$transaction(async (tx) => {
+      const createdDoc = await tx.projectDocument.create({
+        data: {
+          project_id: projectId,
+          doc_type: docType as DocType,
+          visibility: 'Shared_with_administration',
+          file_url: absolutePath.split(sep).join('/'),
+          version: 1,
+          file_name: file.originalname,
+          file_size: file.size,
+        },
       });
-    }
 
-    return createdDoc;
+      await tx.audit_Log.create({
+        data: {
+          actor_id: user.id,
+          action: `upload_project_document:${docType}`,
+          target_id: String(projectId),
+          source_ip: ip,
+        },
+      });
+
+      if (isRequired && status === 'Draft') {
+        const requiredCount = await tx.projectDocument.count({
+          where: {
+            project_id: projectId,
+            doc_type: {
+              in: [...REQUIRED_DOCUMENT_TYPES] as DocType[],
+            },
+          },
+        });
+        if (requiredCount >= REQUIRED_DOCUMENT_TYPES.length) {
+          const applied = await applyStatusTransition(tx, {
+            projectId,
+            actorId: user.id,
+            from: 'Draft',
+            to: 'Proposed',
+            justification: 'Documentos obligatorios completos',
+          });
+          if (applied.applied) {
+            await tx.audit_Log.create({
+              data: {
+                actor_id: user.id,
+                action: 'project_status_transition:Draft->Proposed',
+                target_id: String(projectId),
+                source_ip: ip,
+              },
+            });
+          }
+        }
+      }
+
+      return createdDoc;
+    });
   } catch (error) {
     await unlink(absolutePath).catch(() => undefined);
     throw error;
   }
 }
 
-/** 
- * Obs 6: Interfaz pública para que otros módulos (como Evaluation) 
+/**
+ * Obs 6: Interfaz pública para que otros módulos (como Evaluation)
  * consulten proyectos sin acoplarse a Prisma.
  */
 export async function getProjectWithTeamForEvaluation(projectId: number) {
@@ -318,4 +395,196 @@ export async function getProjectWithTeamForEvaluation(projectId: number) {
     where: { project_id: projectId },
     include: { projectUsers: { include: { user: true } } },
   });
+}
+
+/** Roles institucionales que pueden consultar cualquier proyecto. */
+const INSTITUTIONAL_PROJECT_ROLES = [
+  ROLES.ADMINISTRATOR,
+  ROLES.COORDINATOR,
+  ROLES.COMMITTEE,
+] as const;
+
+/** Estados en los que aun se pueden corregir las banderas de investigacion. */
+const RESEARCH_FLAG_EDITABLE_STATUSES = [
+  'Draft',
+  'Proposed',
+  'Under_Review',
+] as const;
+
+const PROJECT_VIEW_INCLUDE = {
+  call: { select: { title: true } },
+  projectUsers: {
+    select: {
+      user_id: true,
+      project_role: true,
+      user: { select: { name: true } },
+    },
+  },
+  milestones: { select: { status: true } },
+  expenses: { select: { amount: true } },
+} as const;
+
+/**
+ * BR-007 / F1-11: consulta de un proyecto aplicando confidencialidad.
+ * Un proyecto confidencial solo es visible para su equipo y para los
+ * administradores generales.
+ */
+export async function getProjectForViewer(
+  user: AuthenticatedUser,
+  projectId: number,
+) {
+  const project = await prisma.project.findUnique({
+    where: { project_id: projectId },
+    include: PROJECT_VIEW_INCLUDE,
+  });
+  if (!project) {
+    fail(PROJECT_ERROR_CODES.NOT_FOUND, 'El proyecto no existe.', 404);
+  }
+
+  const isMember = project.projectUsers.some(
+    (member) => member.user_id === user.id,
+  );
+  const isInstitutional = (
+    INSTITUTIONAL_PROJECT_ROLES as readonly string[]
+  ).includes(user.role);
+  if (!isMember && !isInstitutional) {
+    fail(
+      PROJECT_ERROR_CODES.FORBIDDEN,
+      'No tienes acceso a este proyecto.',
+      403,
+    );
+  }
+  if (
+    project.is_confidential &&
+    !canViewConfidentialProject(user, isMember)
+  ) {
+    fail(
+      PROJECT_ERROR_CODES.FORBIDDEN,
+      'El proyecto es confidencial y solo su equipo y los administradores pueden consultarlo (BR-007).',
+      403,
+    );
+  }
+
+  return project;
+}
+
+export interface UpdateProjectSettingsData {
+  isConfidential?: boolean;
+  researchInvolvesHumans?: boolean;
+  researchInvolvesAnimals?: boolean;
+  usesSensitiveData?: boolean;
+}
+
+/**
+ * F1-11: el PI ajusta la confidencialidad y las banderas de investigacion
+ * sensible. Las banderas solo pueden corregirse antes de la aprobacion:
+ * cambiarlas despues alteraria las compuertas BR-006 ya evaluadas.
+ */
+export async function updateProjectSettings(
+  user: AuthenticatedUser,
+  projectId: number,
+  input: UpdateProjectSettingsData,
+  ip: string,
+) {
+  const project = await prisma.project.findUnique({
+    where: { project_id: projectId },
+  });
+  if (!project) {
+    fail(PROJECT_ERROR_CODES.NOT_FOUND, 'El proyecto no existe.', 404);
+  }
+  assertProjectWritable(project as { is_read_only?: boolean | null });
+
+  const membership = await prisma.project_User.findFirst({
+    where: {
+      project_id: projectId,
+      user_id: user.id,
+      project_role: 'Principal_Investigator',
+    },
+    select: { projectuser_id: true },
+  });
+  if (!membership) {
+    fail(
+      PROJECT_ERROR_CODES.FORBIDDEN,
+      'Solo el Investigador Principal del proyecto puede actualizar su configuracion.',
+      403,
+    );
+  }
+
+  const data: Prisma.ProjectUpdateInput = {};
+  const changed: string[] = [];
+
+  if (
+    input.isConfidential !== undefined &&
+    input.isConfidential !== project.is_confidential
+  ) {
+    data.is_confidential = input.isConfidential;
+    changed.push('is_confidential');
+  }
+
+  const researchFlags: Array<{
+    key: keyof UpdateProjectSettingsData;
+    column: 'research_involves_humans' | 'research_involves_animals' | 'uses_sensitive_data';
+    current: boolean;
+  }> = [
+    {
+      key: 'researchInvolvesHumans',
+      column: 'research_involves_humans',
+      current: project.research_involves_humans,
+    },
+    {
+      key: 'researchInvolvesAnimals',
+      column: 'research_involves_animals',
+      current: project.research_involves_animals,
+    },
+    {
+      key: 'usesSensitiveData',
+      column: 'uses_sensitive_data',
+      current: project.uses_sensitive_data,
+    },
+  ];
+
+  for (const flag of researchFlags) {
+    const next = input[flag.key];
+    if (next === undefined || next === flag.current) {
+      continue;
+    }
+    if (
+      !(RESEARCH_FLAG_EDITABLE_STATUSES as readonly string[]).includes(
+        project.status,
+      )
+    ) {
+      fail(
+        PROJECT_ERROR_CODES.CONFLICT,
+        'Las banderas de investigacion sensible solo pueden corregirse antes de que el proyecto sea aprobado.',
+        409,
+        flag.key,
+      );
+    }
+    data[flag.column] = next;
+    changed.push(flag.column);
+  }
+
+  if (changed.length === 0) {
+    return prisma.project.findUniqueOrThrow({
+      where: { project_id: projectId },
+      include: PROJECT_VIEW_INCLUDE,
+    });
+  }
+
+  const updated = await prisma.project.update({
+    where: { project_id: projectId },
+    data,
+    include: PROJECT_VIEW_INCLUDE,
+  });
+
+  await prisma.audit_Log.create({
+    data: {
+      actor_id: user.id,
+      action: `update_project_settings:${changed.join(',')}`,
+      target_id: String(projectId),
+      source_ip: ip,
+    },
+  });
+
+  return updated;
 }

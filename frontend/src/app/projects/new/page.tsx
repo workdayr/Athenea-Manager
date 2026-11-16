@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, type FormEvent } from 'react';
+import { useToast } from '@/components/ui/toast-provider';
 import { authClient } from '@/lib/auth-client';
 import {
   ACTIVE_PROJECT_COUNT_QUERY,
@@ -11,6 +12,12 @@ import {
   uploadProjectDocument,
   type RegisterProjectResult,
 } from '@/lib/apollo-client';
+import {
+  fetchCall,
+  formatCallDate,
+  isAcceptingApplications,
+  type Call,
+} from '@/lib/calls';
 
 const TITLE_MAX = 300;
 const OBJECTIVES_MAX = 2000;
@@ -34,12 +41,13 @@ const inputClassName =
   'w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 placeholder:text-gray-400 focus:border-blue-600 focus:outline-none';
 
 /**
- * US 2.1 - Registro de Nueva Propuesta (MVP: Paso 1 + Paso 3 del Figma).
- * Equipo (RF-011), visibilidad (RF-005), declaracion BR-010 y etica
- * (BR-006) quedan fuera de esta entrega.
+ * US 2.1 - Registro de Nueva Propuesta (Paso 1 + Paso 3 del Figma).
+ * F1-11: declara las banderas de investigacion sensible (BR-006) y la
+ * confidencialidad del proyecto (BR-007).
  */
 export default function NewProjectPage() {
   const router = useRouter();
+  const toast = useToast();
   const [checking, setChecking] = useState(true);
   const [denied, setDenied] = useState(false);
   const [activeCount, setActiveCount] = useState<number | null>(null);
@@ -48,11 +56,17 @@ export default function NewProjectPage() {
   const [objectives, setObjectives] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [researchInvolvesHumans, setResearchInvolvesHumans] = useState(false);
+  const [researchInvolvesAnimals, setResearchInvolvesAnimals] = useState(false);
+  const [usesSensitiveData, setUsesSensitiveData] = useState(false);
+  const [isConfidential, setIsConfidential] = useState(false);
   const [files, setFiles] = useState<Record<string, File | null>>({});
-  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState('');
   const [modal, setModal] = useState<Modal>(null);
+  // F1-09 / RF-018: postulacion desde /calls/[callId]?callId=N.
+  const [callId, setCallId] = useState<number | null>(null);
+  const [call, setCall] = useState<Call | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -72,6 +86,21 @@ export default function NewProjectPage() {
         return;
       }
       setChecking(false);
+
+      const requestedCallId = Number(
+        new URLSearchParams(window.location.search).get('callId'),
+      );
+      if (Number.isInteger(requestedCallId) && requestedCallId > 0) {
+        setCallId(requestedCallId);
+        fetchCall(requestedCallId)
+          .then((result) => {
+            if (active) {
+              setCall(result);
+            }
+          })
+          .catch(() => undefined);
+      }
+
       getApolloClient()
         .query<{ activeProjectCount: number }>({
           query: ACTIVE_PROJECT_COUNT_QUERY,
@@ -95,36 +124,53 @@ export default function NewProjectPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
     if (title.trim().length === 0 || title.trim().length > TITLE_MAX) {
-      setError(`El titulo es obligatorio (maximo ${TITLE_MAX} caracteres).`);
+      toast.error(`El titulo es obligatorio (maximo ${TITLE_MAX} caracteres).`);
       return;
     }
     if (
       objectives.trim().length === 0 ||
       objectives.trim().length > OBJECTIVES_MAX
     ) {
-      setError(
+      toast.error(
         `Los objetivos son obligatorios (maximo ${OBJECTIVES_MAX} caracteres).`,
       );
       return;
     }
     if (!startDate || !endDate || endDate <= startDate) {
-      setError('La fecha de fin debe ser posterior a la de inicio.');
+      toast.error('La fecha de fin debe ser posterior a la de inicio.');
       return;
+    }
+    // F1-09: la convocatoria debe seguir aceptando postulaciones. El
+    // backend lo vuelve a validar con bloqueo de fila (cupo/deadline).
+    if (callId !== null) {
+      if (!call) {
+        toast.error(
+          'No se pudo verificar la convocatoria seleccionada. Recarga e intenta de nuevo.',
+        );
+        return;
+      }
+      if (!isAcceptingApplications(call)) {
+        toast.error(
+          call.remainingSlots <= 0
+            ? 'La convocatoria alcanzó su cupo máximo (CALL_FULL).'
+            : 'La convocatoria está cerrada o alcanzó su fecha límite (CALL_CLOSED).',
+        );
+        return;
+      }
     }
     for (const doc of REQUIRED_DOCS) {
       const file = files[doc.type];
       if (!file) {
-        setError(`Adjunta el documento: ${doc.label}.`);
+        toast.error(`Adjunta el documento: ${doc.label}.`);
         return;
       }
       if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
-        setError(`"${file.name}" no es un PDF valido.`);
+        toast.error(`"${file.name}" no es un PDF valido.`);
         return;
       }
       if (file.size > MAX_FILE_BYTES) {
-        setError(`"${file.name}" excede 25 MB por archivo.`);
+        toast.error(`"${file.name}" excede 25 MB por archivo.`);
         return;
       }
     }
@@ -139,6 +185,11 @@ export default function NewProjectPage() {
             objectives: objectives.trim(),
             startDate: new Date(startDate).toISOString(),
             endDate: new Date(endDate).toISOString(),
+            researchInvolvesHumans,
+            researchInvolvesAnimals,
+            usesSensitiveData,
+            isConfidential,
+            ...(callId !== null ? { callId } : {}),
           },
         },
       });
@@ -154,15 +205,35 @@ export default function NewProjectPage() {
       }
       setProgress('');
       setModal({ kind: 'success', projectId });
+      toast.success(
+        `Proyecto #${projectId} creado en estatus Propuesto con los 5 documentos.`,
+        'Propuesta registrada',
+      );
     } catch (submitError) {
       const code = graphqlErrorCode(submitError);
       if (code === 'PI_LIMIT_EXCEEDED') {
-        setError('Alcanzaste el limite de 3 proyectos activos (BR-002).');
+        toast.error('Alcanzaste el limite de 3 proyectos activos (BR-002).');
+      } else if (code === 'CALL_FULL') {
+        toast.error(
+          'La convocatoria alcanzó su cupo máximo y se cerró. Elige otra convocatoria.',
+          'Postulación rechazada',
+        );
+      } else if (code === 'CALL_CLOSED') {
+        toast.error(
+          'La convocatoria está cerrada o alcanzó su fecha límite.',
+          'Postulación rechazada',
+        );
+      } else if (code === 'ALREADY_APPLIED') {
+        toast.error(
+          'Ya tienes una postulación registrada en esta convocatoria.',
+          'Postulación duplicada',
+        );
       } else {
-        setError(
+        toast.error(
           submitError instanceof Error
             ? submitError.message
             : 'No fue posible registrar la propuesta. Intenta de nuevo.',
+          'No se pudo registrar la propuesta',
         );
       }
     } finally {
@@ -209,6 +280,14 @@ export default function NewProjectPage() {
             ? 'Verificando cupo BR-002…'
             : `Regla BR-002: ${activeCount} de ${MAX_ACTIVE} activos · ${slotsLeft} cupo(s) disponible(s)`}
         </p>
+
+        {callId !== null && (
+          <p className="mt-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+            {call
+              ? `Postulando a la convocatoria "${call.title}" · Cierre: ${formatCallDate(call.deadline)} · ${call.remainingSlots} cupo(s) restante(s)`
+              : 'Verificando la convocatoria seleccionada…'}
+          </p>
+        )}
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-6" noValidate>
           <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
@@ -299,6 +378,71 @@ export default function NewProjectPage() {
 
           <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
             <h2 className="text-lg font-semibold text-gray-900">
+              2. Declaraciones de ética y confidencialidad
+            </h2>
+            <p className="mt-1 text-xs text-gray-500">
+              BR-006: si el proyecto involucra seres humanos, animales o datos
+              sensibles, la aprobación de ética será obligatoria antes de la
+              aprobación del proyecto. BR-012: los datasets XLSX de proyectos
+              con seres humanos requieren certificar su anonimización.
+            </p>
+            <div className="mt-4 space-y-3">
+              <label className="flex items-start gap-3 rounded-md bg-blue-50/50 p-3 ring-1 ring-blue-100">
+                <input
+                  type="checkbox"
+                  checked={researchInvolvesHumans}
+                  onChange={(event) =>
+                    setResearchInvolvesHumans(event.target.checked)
+                  }
+                  className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-sm text-gray-800">
+                  El proyecto involucra seres humanos.
+                </span>
+              </label>
+              <label className="flex items-start gap-3 rounded-md bg-blue-50/50 p-3 ring-1 ring-blue-100">
+                <input
+                  type="checkbox"
+                  checked={researchInvolvesAnimals}
+                  onChange={(event) =>
+                    setResearchInvolvesAnimals(event.target.checked)
+                  }
+                  className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-sm text-gray-800">
+                  El proyecto involucra animales.
+                </span>
+              </label>
+              <label className="flex items-start gap-3 rounded-md bg-blue-50/50 p-3 ring-1 ring-blue-100">
+                <input
+                  type="checkbox"
+                  checked={usesSensitiveData}
+                  onChange={(event) =>
+                    setUsesSensitiveData(event.target.checked)
+                  }
+                  className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-sm text-gray-800">
+                  El proyecto utiliza datos sensibles.
+                </span>
+              </label>
+              <label className="flex items-start gap-3 rounded-md bg-gray-50 p-3 ring-1 ring-gray-200">
+                <input
+                  type="checkbox"
+                  checked={isConfidential}
+                  onChange={(event) => setIsConfidential(event.target.checked)}
+                  className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-sm text-gray-800">
+                  Proyecto confidencial: solo el equipo y los administradores
+                  generales podrán consultarlo (BR-007).
+                </span>
+              </label>
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+            <h2 className="text-lg font-semibold text-gray-900">
               3. Carga de Documentación Mínima Requerida (5 PDFs)
             </h2>
             <p className="mt-1 text-xs text-gray-500">
@@ -333,14 +477,6 @@ export default function NewProjectPage() {
             </div>
           </section>
 
-          {error && (
-            <p
-              role="alert"
-              className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
-            >
-              {error}
-            </p>
-          )}
           {progress && (
             <p role="status" className="text-sm text-blue-700">
               {progress}

@@ -20,8 +20,18 @@ const { prismaMock, txMock } = vi.hoisted(() => {
       create: vi.fn(),
       findMany: vi.fn(),
     },
+    project_Archive: {
+      findMany: vi.fn(),
+      count: vi.fn(),
+    },
     user: {
       findMany: vi.fn(),
+    },
+    notification: {
+      create: vi.fn(),
+    },
+    email_Outbox: {
+      create: vi.fn(),
     },
     $transaction: vi.fn(
       async (callback: (transaction: typeof tx) => unknown) => callback(tx),
@@ -71,9 +81,13 @@ beforeEach(() => {
 
   prismaMock.project.findMany.mockResolvedValue([{ project_id: 5 }]);
   prismaMock.archive_Alert.create.mockResolvedValue({ alert_id: 1 });
+  prismaMock.project_Archive.findMany.mockResolvedValue([]);
+  prismaMock.project_Archive.count.mockResolvedValue(0);
   prismaMock.user.findMany.mockResolvedValue([
-    { email: 'admin@unipolidgo.edu.mx' },
+    { id: 'admin-1', email: 'admin@unipolidgo.edu.mx' },
   ]);
+  prismaMock.notification.create.mockResolvedValue({ notification_id: 1 });
+  prismaMock.email_Outbox.create.mockResolvedValue({ email_id: 1 });
   prismaMock.$transaction.mockImplementation(
     async (callback: (transaction: typeof txMock) => unknown) => callback(txMock),
   );
@@ -173,8 +187,16 @@ describe('ProjectArchiveService (RF-020)', () => {
     });
     expect(prismaMock.user.findMany).toHaveBeenCalledWith({
       where: { role: 'ADMINISTRATOR' },
-      select: { email: true },
+      select: { id: true, email: true },
     });
+    // RF-014: la alerta se convierte en notificacion + correo encolado.
+    expect(prismaMock.notification.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        user_id: 'admin-1',
+        type: 'Archive',
+      }),
+    });
+    expect(prismaMock.email_Outbox.create).toHaveBeenCalled();
   });
 
   it('trata el conflicto de unicidad como archivado concurrente, sin alertar', async () => {
@@ -234,6 +256,36 @@ describe('ProjectArchiveService (RF-020)', () => {
       select: { project_id: true },
       orderBy: { project_id: 'asc' },
       take: expect.any(Number),
+    });
+  });
+
+  it('lista los expedientes archivados con paginacion', async () => {
+    prismaMock.project_Archive.findMany.mockResolvedValue([
+      {
+        project_id: 5,
+        archived_at: new Date('2026-11-01T00:00:00.000Z'),
+        snapshot_hash: 'a'.repeat(64),
+        project: { project_id: 5, title: 'Cerrado', status: 'Closed' },
+      },
+    ]);
+    prismaMock.project_Archive.count.mockResolvedValue(1);
+
+    const page = await service().listArchived(1, 20);
+
+    expect(page.total).toBe(1);
+    expect(page.items[0]).toMatchObject({
+      project_id: 5,
+      title: 'Cerrado',
+      status: 'Closed',
+      snapshot_hash: 'a'.repeat(64),
+    });
+    expect(prismaMock.project_Archive.findMany).toHaveBeenCalledWith({
+      orderBy: { archived_at: 'desc' },
+      skip: 0,
+      take: 20,
+      include: {
+        project: { select: { project_id: true, title: true, status: true } },
+      },
     });
   });
 
