@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, type ReactNode } from 'react';
 import { NotificationBell } from '@/components/notifications/notification-bell';
+import { Drawer } from '@/components/ui/drawer';
+import { Spinner } from '@/components/ui/spinner';
 import { Icon } from './icons';
 import {
   ROLE_LABELS,
@@ -19,7 +21,7 @@ interface AppShellProps {
   searchQuery: string;
   searchPlaceholder: string;
   onSearchChange: (value: string) => void;
-  onSignOut: () => void;
+  onSignOut: () => void | Promise<void>;
   children: ReactNode;
 }
 
@@ -41,6 +43,8 @@ export function AppShell({
 }: AppShellProps) {
   const router = useRouter();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const navItems = navItemsForRole(user.role);
 
   function submitSearch(event: React.FormEvent<HTMLFormElement>) {
@@ -48,6 +52,16 @@ export function AppShell({
     const query = searchQuery.trim();
     if (query.length > 0) {
       router.push(`/search?q=${encodeURIComponent(query)}`);
+      setMobileSearchOpen(false);
+    }
+  }
+
+  async function handleSignOut() {
+    setSigningOut(true);
+    try {
+      await onSignOut();
+    } finally {
+      setSigningOut(false);
     }
   }
 
@@ -58,21 +72,25 @@ export function AppShell({
           <button
             type="button"
             onClick={() => setDrawerOpen(true)}
-            className="grid h-9 w-9 place-items-center rounded-lg text-muted hover:bg-brand-50 hover:text-ink lg:hidden"
+            className="grid h-9 w-9 place-items-center rounded-lg text-muted transition-colors duration-150 hover:bg-brand-50 hover:text-ink lg:hidden"
             aria-label="Abrir menú de navegación"
+            aria-expanded={drawerOpen}
           >
             <Icon name="menu" className="h-5 w-5" />
           </button>
 
-          <Link href="/dashboard" className="flex shrink-0 items-center gap-2.5">
-            <span className="grid h-9 w-9 place-items-center rounded-lg bg-gradient-to-br from-brand-800 to-brand-500 text-white shadow-sm">
+          <Link
+            href="/dashboard"
+            className="flex shrink-0 items-center gap-2.5 rounded-lg"
+          >
+            <span className="grid h-9 w-9 place-items-center rounded-lg bg-gradient-to-br from-brand-800 to-brand-500 text-white shadow-card">
               <Icon name="athenea" className="h-5 w-5" />
             </span>
             <span className="leading-tight">
               <span className="block text-[15px] font-semibold tracking-tight text-ink">
                 Athenea Manager
               </span>
-              <span className="block text-[10px] font-medium uppercase tracking-[0.08em] text-muted">
+              <span className="hidden text-[10px] font-medium uppercase tracking-[0.08em] text-muted sm:block">
                 Gestión de Investigación Científica · UNIPOLI
               </span>
             </span>
@@ -93,25 +111,35 @@ export function AppShell({
                 value={searchQuery}
                 onChange={(event) => onSearchChange(event.target.value)}
                 placeholder={searchPlaceholder}
-                className="h-9 w-full rounded-full border border-transparent bg-[#f1f3f9] pl-9 pr-4 text-sm text-ink placeholder:text-[#8a93a8] focus:border-brand-300 focus:bg-white focus:outline-none"
+                className="h-9 w-full rounded-full border border-transparent bg-surface-3 pl-9 pr-4 text-sm text-ink transition-colors duration-150 placeholder:text-muted hover:bg-surface-2 focus:border-brand-300 focus:bg-white"
               />
             </label>
           </form>
 
           <div className="ml-auto flex items-center gap-2 sm:gap-3">
+            <button
+              type="button"
+              onClick={() => setMobileSearchOpen((open) => !open)}
+              aria-expanded={mobileSearchOpen}
+              aria-controls="mobile-search"
+              aria-label="Buscar"
+              className="grid h-9 w-9 place-items-center rounded-lg text-muted transition-colors duration-150 hover:bg-brand-50 hover:text-ink md:hidden"
+            >
+              <Icon name="search" className="h-[18px] w-[18px]" />
+            </button>
+
             <div
-              className="hidden shrink-0 items-center gap-2 whitespace-nowrap rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink sm:flex"
+              className="hidden shrink-0 items-center gap-2 whitespace-nowrap rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink md:flex"
               title="El rol lo asigna la administración y no puede cambiarse desde el cliente (RF-001)."
             >
-              <span className="h-2 w-2 rounded-full bg-brand-500" />
+              <span aria-hidden="true" className="h-2 w-2 rounded-full bg-brand-500" />
               Rol: {ROLE_LABELS[user.role]}
-              <Icon name="chevronDown" className="h-3.5 w-3.5 text-muted" />
             </div>
 
             <NotificationBell />
 
             <div className="flex items-center gap-2.5 border-l border-line pl-2 sm:pl-3">
-              <span className="grid h-9 w-9 place-items-center rounded-full bg-gradient-to-br from-brand-600 to-brand-400 text-xs font-semibold text-white">
+              <span className="grid h-9 w-9 place-items-center rounded-full bg-gradient-to-br from-brand-600 to-brand-400 text-xs font-semibold text-white ring-1 ring-inset ring-white/20">
                 {initials(user.name)}
               </span>
               <span className="hidden leading-tight sm:block">
@@ -125,6 +153,30 @@ export function AppShell({
             </div>
           </div>
         </div>
+
+        {mobileSearchOpen && (
+          <div
+            id="mobile-search"
+            className="animate-fade-in border-t border-line px-4 py-2.5 md:hidden"
+          >
+            <form onSubmit={submitSearch} role="search" className="relative">
+              <label className="relative block">
+                <span className="sr-only">Búsqueda global</span>
+                <Icon
+                  name="search"
+                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted"
+                />
+                <input
+                  autoFocus
+                  value={searchQuery}
+                  onChange={(event) => onSearchChange(event.target.value)}
+                  placeholder={searchPlaceholder}
+                  className="h-10 w-full rounded-lg border border-line-strong bg-surface-2 pl-9 pr-4 text-sm text-ink placeholder:text-muted focus:border-brand-300 focus:bg-white"
+                />
+              </label>
+            </form>
+          </div>
+        )}
       </header>
 
       {/* Navegacion de escritorio */}
@@ -133,41 +185,28 @@ export function AppShell({
           user={user}
           activeId={activeId}
           navItems={navItems}
-          onSignOut={onSignOut}
+          onSignOut={handleSignOut}
+          signingOut={signingOut}
         />
       </aside>
 
       {/* Navegacion movil */}
-      {drawerOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden">
-          <button
-            type="button"
-            className="absolute inset-0 bg-ink/30 backdrop-blur-[1px]"
-            aria-label="Cerrar menú de navegación"
-            onClick={() => setDrawerOpen(false)}
-          />
-          <div className="absolute inset-y-0 left-0 flex w-72 flex-col bg-white shadow-xl">
-            <div className="flex items-center justify-between border-b border-line px-4 py-3">
-              <span className="text-sm font-semibold text-ink">Navegación</span>
-              <button
-                type="button"
-                onClick={() => setDrawerOpen(false)}
-                className="grid h-8 w-8 place-items-center rounded-md text-muted hover:bg-brand-50"
-                aria-label="Cerrar menú"
-              >
-                <Icon name="close" className="h-4 w-4" />
-              </button>
-            </div>
-            <SidebarContent
-              user={user}
-              activeId={activeId}
-              navItems={navItems}
-              onSignOut={onSignOut}
-              onNavigate={() => setDrawerOpen(false)}
-            />
-          </div>
-        </div>
-      )}
+      <Drawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        title="Navegación"
+        description={sidebarTitleForRole(user.role)}
+        className="lg:hidden"
+      >
+        <SidebarContent
+          user={user}
+          activeId={activeId}
+          navItems={navItems}
+          onSignOut={handleSignOut}
+          signingOut={signingOut}
+          onNavigate={() => setDrawerOpen(false)}
+        />
+      </Drawer>
 
       <div className="lg:pl-64">
         <main className="mx-auto w-full max-w-[1400px] px-4 py-6 lg:px-8 lg:py-8">
@@ -183,12 +222,14 @@ function SidebarContent({
   activeId,
   navItems,
   onSignOut,
+  signingOut = false,
   onNavigate,
 }: {
   user: DashboardUser;
   activeId: string;
   navItems: ReturnType<typeof navItemsForRole>;
   onSignOut: () => void;
+  signingOut?: boolean;
   onNavigate?: () => void;
 }) {
   return (
@@ -206,7 +247,7 @@ function SidebarContent({
               className={
                 isActive
                   ? 'mt-0.5 h-[18px] w-[18px] text-white'
-                  : 'mt-0.5 h-[18px] w-[18px] text-muted'
+                  : 'mt-0.5 h-[18px] w-[18px] text-muted transition-colors duration-150 group-hover:text-brand-700'
               }
             />
           );
@@ -239,14 +280,14 @@ function SidebarContent({
                 href={item.href}
                 onClick={onNavigate}
                 aria-current="page"
-                className="flex items-start gap-3 rounded-lg bg-gradient-to-r from-brand-900 to-brand-700 px-3 py-2.5 text-white shadow-sm"
+                className="flex items-start gap-3 rounded-lg bg-gradient-to-r from-brand-900 to-brand-700 px-3 py-2.5 text-white shadow-card"
               >
                 {icon}
                 <span className="min-w-0">
-                  <span className="block truncate text-[13px] font-semibold">
+                  <span className="block text-[13px] font-semibold leading-snug">
                     {item.label}
                   </span>
-                  <span className="block truncate text-[10px] text-white/70">
+                  <span className="block truncate text-[10px] text-white/75">
                     {item.subtitle}
                   </span>
                 </span>
@@ -259,14 +300,14 @@ function SidebarContent({
               key={item.id}
               href={item.href}
               onClick={onNavigate}
-              className={`group flex items-start gap-3 rounded-lg px-3 py-2.5 text-ink transition hover:bg-brand-50 ${
+              className={`group flex items-start gap-3 rounded-lg px-3 py-2.5 text-ink transition-colors duration-150 hover:bg-brand-50 ${
                 item.compact ? 'pl-9' : ''
               }`}
             >
               {icon}
               <span className="min-w-0">
                 <span
-                  className={`block truncate font-medium ${
+                  className={`block font-medium leading-snug ${
                     item.compact ? 'text-[12px]' : 'text-[13px]'
                   }`}
                 >
@@ -279,31 +320,29 @@ function SidebarContent({
       </nav>
 
       <div className="mt-auto pt-6">
-        <div className="rounded-lg border border-line bg-[#f8f9fd] p-3">
-          <div className="flex items-center justify-between text-xs font-semibold text-ink">
-            <span className="flex items-center gap-1.5">
-              <Icon name="shield" className="h-4 w-4 text-brand-600" />
-              Almacenamiento Seguro
-            </span>
-            <span>68%</span>
-          </div>
-          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#e2e7f3]">
-            <div className="h-full w-[68%] rounded-full bg-brand-600" />
-          </div>
-          <p className="mt-2 text-[10px] leading-relaxed text-muted">
-            Cifrado AES-256-GCM Activo
-            <br />
-            Cumplimiento LFPDPPP / UNIPOLI
+        <div className="rounded-lg border border-line bg-surface-2 p-3">
+          <p className="flex items-center gap-1.5 text-xs font-semibold text-ink">
+            <Icon name="shield" className="h-4 w-4 text-brand-600" />
+            Documentos protegidos
+          </p>
+          <p className="mt-1.5 text-[10px] leading-relaxed text-muted">
+            Cifrado AES-256-GCM en reposo y control de acceso por rol.
+            Cumplimiento LFPDPPP / UNIPOLI.
           </p>
         </div>
 
         <button
           type="button"
           onClick={onSignOut}
-          className="mt-3 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[13px] font-medium text-muted transition hover:bg-red-50 hover:text-red-700"
+          disabled={signingOut}
+          className="mt-3 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[13px] font-medium text-muted transition-colors duration-150 hover:bg-danger-soft hover:text-danger disabled:opacity-60"
         >
-          <Icon name="logout" className="h-4 w-4" />
-          Cerrar sesión
+          {signingOut ? (
+            <Spinner className="h-4 w-4" />
+          ) : (
+            <Icon name="logout" className="h-4 w-4" />
+          )}
+          {signingOut ? 'Cerrando sesión…' : 'Cerrar sesión'}
         </button>
       </div>
     </div>
