@@ -309,7 +309,10 @@ export interface InstitutionalKpi {
 export type SlaStatus = 'on_track' | 'at_risk' | 'upcoming' | 'no_milestones';
 
 export interface PriorityProject {
+  /** Identificador visible (PRJ-0001). */
   id: string;
+  /** Identificador numérico para enlazar al detalle. */
+  projectId: string;
   title: string;
   call: string;
   pi: string;
