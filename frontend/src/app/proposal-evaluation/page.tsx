@@ -1,14 +1,18 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { useToast } from '@/components/ui/toast-provider';
-import { authClient } from '@/lib/auth-client';
-import {
-  getApolloClient,
-  graphqlErrorCode,
-} from '@/lib/apollo-client';
+import { AuthedShell } from '@/components/dashboard/authed-shell';
+import { Icon } from '@/components/dashboard/icons';
+import { Alert } from '@/components/ui/alert';
+import { Breadcrumbs } from '@/components/ui/breadcrumbs';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import { NoAccess } from '@/components/ui/no-access';
+import { PageHeader } from '@/components/ui/page-header';
+import { Skeleton } from '@/components/ui/skeleton';
+import { STATUS_LABELS } from '@/lib/dashboard';
+import { getApolloClient, graphqlErrorCode } from '@/lib/apollo-client';
 import {
   PROPOSALS_PENDING_REVIEW_QUERY,
   type ProposalSummary,
@@ -22,133 +26,165 @@ const ALLOWED_ROLES = ['COMMITTEE', 'COORDINATOR'];
  * alerta BR-011 y enlazan al detalle (lectura, sin formulario).
  */
 export default function ProposalEvaluationListPage() {
-  const router = useRouter();
-  const toast = useToast();
-  const [checking, setChecking] = useState(true);
-  const [denied, setDenied] = useState(false);
+  return (
+    <AuthedShell
+      activeId="evaluacion"
+      searchPlaceholder="Buscar propuestas por título o investigador…"
+    >
+      {(user) => <ProposalEvaluationContent canReview={ALLOWED_ROLES.includes(user.role)} />}
+    </AuthedShell>
+  );
+}
+
+function ProposalEvaluationContent({ canReview }: { canReview: boolean }) {
   const [proposals, setProposals] = useState<ProposalSummary[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
+    if (!canReview) {
+      return;
+    }
     let active = true;
-    authClient.getSession().then(({ data }) => {
-      if (!active) {
-        return;
-      }
-      const role = (data?.user as { role?: string } | undefined)?.role;
-      if (!data?.user) {
-        router.replace('/login');
-        return;
-      }
-      if (!role || !ALLOWED_ROLES.includes(role)) {
-        setDenied(true);
-        setChecking(false);
-        return;
-      }
-      setChecking(false);
-      getApolloClient()
-        .query<{ proposalsPendingReview: ProposalSummary[] }>({
-          query: PROPOSALS_PENDING_REVIEW_QUERY,
-          fetchPolicy: 'network-only',
-        })
-        .then((result) => {
-          if (active) {
-            setProposals(result.data?.proposalsPendingReview ?? []);
-          }
-        })
-        .catch((queryError: unknown) => {
-          if (active) {
-            const code = graphqlErrorCode(queryError);
-            toast.error(
-              code === 'FORBIDDEN'
-                ? 'No tienes permisos para ver esta lista.'
-                : 'No fue posible cargar las propuestas. Intenta de nuevo.',
-              'No se pudo cargar la lista',
-            );
-          }
-        });
-    });
+    getApolloClient()
+      .query<{ proposalsPendingReview: ProposalSummary[] }>({
+        query: PROPOSALS_PENDING_REVIEW_QUERY,
+        fetchPolicy: 'network-only',
+      })
+      .then((result) => {
+        if (active) {
+          setProposals(result.data?.proposalsPendingReview ?? []);
+        }
+      })
+      .catch((queryError: unknown) => {
+        if (active) {
+          setProposals(null);
+          setError(
+            graphqlErrorCode(queryError) === 'FORBIDDEN'
+              ? 'Tu cuenta no tiene permisos para revisar propuestas.'
+              : 'No pudimos cargar las propuestas pendientes.',
+          );
+        }
+      });
     return () => {
       active = false;
     };
-  }, [router, toast]);
+  }, [canReview, reloadKey]);
 
-  if (checking) {
+  if (!canReview) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-50">
-        <p className="text-sm text-gray-600">Verificando sesión…</p>
-      </main>
-    );
-  }
-
-  if (denied) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
-        <section className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-8 text-center shadow-sm">
-          <h1 className="text-xl font-semibold text-gray-900">Acceso denegado</h1>
-          <p className="mt-2 text-sm text-gray-600">
-            Solo el Comité de Evaluación o la Coordinación pueden revisar
-            propuestas (UC-003).
-          </p>
-        </section>
-      </main>
+      <NoAccess
+        title="Revisión reservada al Comité"
+        description="Solo el Comité de Evaluación o la Coordinación pueden revisar propuestas. Si crees que es un error, contacta al administrador del sistema."
+      />
     );
   }
 
   return (
-    <main className="min-h-screen bg-gray-50 px-4 py-8">
-      <div className="mx-auto w-full max-w-3xl">
-        <p className="text-xs font-medium text-blue-700">
-          EVALUACIÓN DE PROPUESTAS · UC-003 / RF-019
-        </p>
-        <h1 className="mt-1 text-2xl font-semibold text-gray-900">
-          Propuestas pendientes de revisión
-        </h1>
+    <div className="space-y-6">
+      <Breadcrumbs
+        items={[
+          { label: 'Panel', href: '/dashboard' },
+          { label: 'Evaluación de propuestas' },
+        ]}
+      />
 
-        {proposals !== null && proposals.length === 0 && (
-          <p className="mt-4 rounded-md border border-gray-200 bg-white px-3 py-4 text-sm text-gray-600">
-            No hay propuestas en estado Propuesto o En revisión.
-          </p>
-        )}
+      <PageHeader
+        title="Propuestas pendientes de revisión"
+        description="Protocolos en estado Propuesto o En revisión listos para dictamen."
+      />
 
-        <ul className="mt-6 space-y-3">
-          {(proposals ?? []).map((proposal) => (
+      {error && (
+        <ErrorState
+          className="min-h-[280px] justify-center bg-white"
+          title="No pudimos cargar las propuestas"
+          description={error}
+          onRetry={() => {
+            setError(null);
+            setProposals(null);
+            setReloadKey((key) => key + 1);
+          }}
+        />
+      )}
+
+      {!error && proposals === null && <ProposalsSkeleton />}
+
+      {!error && proposals !== null && proposals.length === 0 && (
+        <EmptyState
+          className="bg-white px-6 py-12"
+          icon={<Icon name="evaluation" className="h-5 w-5" />}
+          title="No hay propuestas pendientes"
+          description="Cuando un Investigador Principal radique una propuesta, aparecerá aquí para su revisión por pares."
+        />
+      )}
+
+      {!error && proposals !== null && proposals.length > 0 && (
+        <ul className="space-y-3">
+          {proposals.map((proposal) => (
             <li
               key={proposal.projectId}
-              className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm"
+              className="rounded-xl border border-line bg-white p-5"
             >
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-xs text-gray-500">
-                    Proyecto #{proposal.projectId} · {proposal.status}
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted">
+                    Proyecto #{proposal.projectId} ·{' '}
+                    {STATUS_LABELS[proposal.status] ?? proposal.status}
                   </p>
-                  <h2 className="mt-1 text-lg font-semibold text-gray-900">
+                  <h2 className="mt-1 text-base font-semibold leading-snug text-ink">
                     {proposal.title}
                   </h2>
                 </div>
                 {proposal.hasConflict && (
-                  <span className="shrink-0 rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800">
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-warning-line bg-warning-soft px-2.5 py-1 text-[10.5px] font-semibold text-warning">
+                    <Icon name="alert" className="h-3 w-3" />
                     Conflicto de interés
                   </span>
                 )}
               </div>
+
               {proposal.matchedSurnames.length > 0 && (
-                <p className="mt-2 text-xs text-amber-800">
+                <Alert tone="warning" className="mt-3">
                   Apellidos coincidentes: {proposal.matchedSurnames.join(', ')}
                   {proposal.conflictStatus
                     ? ` · Alerta ${proposal.conflictStatus}`
                     : ''}
-                </p>
+                </Alert>
               )}
+
               <Link
                 href={`/proposal-evaluation/${proposal.projectId}`}
-                className="mt-3 inline-block text-sm font-medium text-blue-700 hover:underline"
+                className="group mt-4 inline-flex items-center gap-1 rounded text-[13px] font-semibold text-brand-700 transition-colors duration-150 hover:text-brand-800"
               >
-                Revisar propuesta →
+                Revisar propuesta
+                <Icon
+                  name="chevronRight"
+                  className="h-3.5 w-3.5 transition-transform duration-150 ease-snappy group-hover:translate-x-0.5"
+                />
               </Link>
             </li>
           ))}
         </ul>
-      </div>
-    </main>
+      )}
+    </div>
+  );
+}
+
+function ProposalsSkeleton() {
+  return (
+    <div className="space-y-3" aria-busy="true">
+      <span className="sr-only">Cargando propuestas…</span>
+      {[0, 1, 2].map((index) => (
+        <div
+          key={index}
+          aria-hidden="true"
+          className="rounded-xl border border-line bg-white p-5"
+        >
+          <Skeleton className="h-2.5 w-40" />
+          <Skeleton className="mt-2 h-4 w-3/4" />
+          <Skeleton className="mt-4 h-3 w-28" />
+        </div>
+      ))}
+    </div>
   );
 }
