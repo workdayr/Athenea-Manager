@@ -1,10 +1,21 @@
 'use client';
 
-import Link from 'next/link';
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
-import { authClient } from '@/lib/auth-client';
-import { toPlatformRole, type PlatformRole } from '@/lib/dashboard';
+import { useEffect, useState, type FormEvent } from 'react';
+import { AuthedShell } from '@/components/dashboard/authed-shell';
+import { Icon } from '@/components/dashboard/icons';
+import { Alert } from '@/components/ui/alert';
+import { Breadcrumbs } from '@/components/ui/breadcrumbs';
+import { Button, ButtonLink } from '@/components/ui/button';
+import { SectionCard } from '@/components/ui/card';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import { Input } from '@/components/ui/field';
+import { NoAccess } from '@/components/ui/no-access';
+import { PageHeader } from '@/components/ui/page-header';
+import { Pager } from '@/components/ui/pager';
+import { SkeletonRows } from '@/components/ui/skeleton';
+import { TableShell, Td, Th } from '@/components/ui/table';
+import type { DashboardUser } from '@/lib/dashboard';
 import {
   auditErrorMessage,
   fetchAuditLog,
@@ -20,65 +31,66 @@ const EMPTY_FILTERS: AuditFilters = {
   to: '',
 };
 
-/** F1-08 / RF-017: consulta filtrada de la bitacora inmutable. */
+const TIMESTAMP_FORMAT = new Intl.DateTimeFormat('es-MX', {
+  dateStyle: 'short',
+  timeStyle: 'short',
+});
+
+/**
+ * F1-08 / RF-017: consulta filtrada de la bitácora inmutable.
+ * Solo lectura: la pantalla no ofrece acciones sobre los registros.
+ */
 export default function AdminAuditPage() {
-  const router = useRouter();
-  const [checking, setChecking] = useState(true);
-  const [role, setRole] = useState<PlatformRole>('STUDENT');
+  return (
+    <AuthedShell
+      activeId="configuracion"
+      searchPlaceholder="Buscar en la bitácora por actor, acción o proyecto…"
+    >
+      {(user) => <AdminAuditContent user={user} />}
+    </AuthedShell>
+  );
+}
+
+function AdminAuditContent({ user }: { user: DashboardUser }) {
+  const canRead =
+    user.role === 'ADMINISTRATOR' || user.role === 'COORDINATOR';
+
   const [draft, setDraft] = useState<AuditFilters>(EMPTY_FILTERS);
   const [applied, setApplied] = useState<AuditFilters>({});
   const [page, setPage] = useState(1);
   const [result, setResult] = useState<AuditLogPage | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const requestKey = `${page}|${JSON.stringify(applied)}|${reloadKey}`;
+  const loading = loadedKey !== requestKey;
 
   useEffect(() => {
+    if (!canRead) {
+      return;
+    }
+    const key = `${page}|${JSON.stringify(applied)}|${reloadKey}`;
     let active = true;
-    authClient
-      .getSession()
-      .then(({ data }) => {
-        if (!active) {
-          return;
-        }
-        if (!data?.user) {
-          router.replace('/login');
-          return;
-        }
-        const role = toPlatformRole((data.user as { role?: unknown }).role);
-        if (role !== 'ADMINISTRATOR' && role !== 'COORDINATOR') {
-          router.replace('/access-denied');
-          return;
-        }
-        setRole(role);
-        setChecking(false);
-      })
-      .catch(() => {
+    fetchAuditLog(applied, page)
+      .then((rows) => {
         if (active) {
-          router.replace('/login');
+          setResult(rows);
+          setError(null);
+          setLoadedKey(key);
+        }
+      })
+      .catch((loadError: unknown) => {
+        if (active) {
+          setResult(null);
+          setError(auditErrorMessage(loadError));
+          setLoadedKey(key);
         }
       });
     return () => {
       active = false;
     };
-  }, [router]);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setResult(await fetchAuditLog(applied, page));
-    } catch (loadError: unknown) {
-      setError(auditErrorMessage(loadError));
-    } finally {
-      setLoading(false);
-    }
-  }, [applied, page]);
-
-  useEffect(() => {
-    if (!checking) {
-      void load();
-    }
-  }, [checking, load]);
+  }, [applied, canRead, page, reloadKey]);
 
   function handleFilter(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -92,209 +104,255 @@ export default function AdminAuditPage() {
     setPage(1);
   }
 
+  if (!canRead) {
+    return (
+      <NoAccess
+        title="Bitácora reservada a la administración"
+        description="Solo la administración y la coordinación pueden consultar el registro de auditoría del sistema."
+      />
+    );
+  }
+
+  const hasFilters = Object.values(applied).some(
+    (value) => typeof value === 'string' && value.length > 0,
+  );
+  const pageCount = result ? Math.max(1, result.pageInfo.totalPages) : 1;
+
   return (
-    <main className="min-h-screen bg-surface px-4 py-8">
-      <div className="mx-auto w-full max-w-6xl">
-        <Link
-          href="/dashboard"
-          className="text-xs font-semibold uppercase tracking-wide text-brand-700 hover:underline"
-        >
-          ← Volver al panel
-        </Link>
-        <div className="mt-3 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-ink">
-              Bitacora de auditoria
-            </h1>
-            <p className="mt-1 text-sm text-muted">
-              Registro inmutable de acciones institucionales (RF-017). Visible
-              para {role === 'COORDINATOR' ? 'coordinacion' : 'administracion'}.
-            </p>
-          </div>
-          {role === 'ADMINISTRATOR' && (
-            <Link
-              href="/admin/archive"
-              className="rounded-md border border-line bg-white px-3 py-2 text-xs font-semibold text-ink hover:bg-brand-50"
-            >
+    <div className="space-y-5">
+      <Breadcrumbs
+        items={[
+          { label: 'Panel', href: '/dashboard' },
+          { label: 'Configuración y auditoría' },
+        ]}
+      />
+
+      <PageHeader
+        title="Bitácora de auditoría"
+        description="Registro inmutable de las acciones institucionales. Visible para administración y coordinación; no admite edición ni borrado."
+        actions={
+          user.role === 'ADMINISTRATOR' ? (
+            <ButtonLink href="/admin/archive" variant="secondary" size="sm">
               Expedientes archivados
-            </Link>
-          )}
-        </div>
+            </ButtonLink>
+          ) : undefined
+        }
+      />
 
-        <form
-          onSubmit={handleFilter}
-          className="mt-5 grid gap-3 rounded-xl border border-line bg-white p-4 shadow-sm md:grid-cols-5"
+      <form onSubmit={handleFilter} noValidate>
+        <SectionCard
+          title="Filtros"
+          description="Combina criterios para acotar el periodo o una acción concreta."
         >
-          <Field
-            label="ID del actor"
-            value={draft.actorId ?? ''}
-            onChange={(value) => setDraft({ ...draft, actorId: value })}
-          />
-          <Field
-            label="Accion"
-            value={draft.action ?? ''}
-            placeholder="milestone_created"
-            onChange={(value) => setDraft({ ...draft, action: value })}
-          />
-          <Field
-            label="ID del objetivo"
-            value={draft.targetId ?? ''}
-            onChange={(value) => setDraft({ ...draft, targetId: value })}
-          />
-          <Field
-            type="date"
-            label="Desde"
-            value={draft.from ?? ''}
-            onChange={(value) => setDraft({ ...draft, from: value })}
-          />
-          <Field
-            type="date"
-            label="Hasta"
-            value={draft.to ?? ''}
-            onChange={(value) => setDraft({ ...draft, to: value })}
-          />
-          <div className="flex gap-2 md:col-span-5">
-            <button
-              type="submit"
-              className="rounded-md bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800"
-            >
-              Filtrar
-            </button>
-            <button
-              type="button"
-              onClick={clearFilters}
-              className="rounded-md border border-line px-4 py-2 text-sm font-medium text-ink hover:bg-surface"
-            >
-              Limpiar
-            </button>
-          </div>
-        </form>
+          <div className="space-y-4 px-5 py-4">
+            <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-5">
+              <Input
+                id="audit-actor"
+                label="ID del actor"
+                value={draft.actorId ?? ''}
+                onChange={(event) =>
+                  setDraft({ ...draft, actorId: event.target.value })
+                }
+                placeholder="usr_…"
+              />
+              <Input
+                id="audit-action"
+                label="Acción"
+                value={draft.action ?? ''}
+                onChange={(event) =>
+                  setDraft({ ...draft, action: event.target.value })
+                }
+                placeholder="milestone_created"
+              />
+              <Input
+                id="audit-target"
+                label="ID del objetivo"
+                value={draft.targetId ?? ''}
+                onChange={(event) =>
+                  setDraft({ ...draft, targetId: event.target.value })
+                }
+                placeholder="123"
+              />
+              <Input
+                id="audit-from"
+                label="Desde"
+                type="date"
+                value={draft.from ?? ''}
+                onChange={(event) =>
+                  setDraft({ ...draft, from: event.target.value })
+                }
+              />
+              <Input
+                id="audit-to"
+                label="Hasta"
+                type="date"
+                value={draft.to ?? ''}
+                onChange={(event) =>
+                  setDraft({ ...draft, to: event.target.value })
+                }
+              />
+            </div>
 
-        {loading && (
-          <p className="mt-6 text-sm text-muted">Consultando bitacora…</p>
-        )}
-        {!loading && error && (
-          <div className="mt-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-            <p>{error}</p>
-            <button
-              type="button"
-              onClick={() => void load()}
-              className="mt-2 rounded border border-red-300 px-3 py-1 text-xs font-medium"
-            >
-              Reintentar
-            </button>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={clearFilters}
+                disabled={!hasFilters}
+              >
+                Limpiar
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                leadingIcon={<Icon name="filter" className="h-3.5 w-3.5" />}
+              >
+                Aplicar filtros
+              </Button>
+            </div>
           </div>
-        )}
+        </SectionCard>
+      </form>
 
-        {!loading && !error && result && (
-          <section className="mt-5 overflow-hidden rounded-xl border border-line bg-white shadow-sm">
-            <header className="flex items-center justify-between border-b border-line px-5 py-3">
-              <h2 className="text-sm font-semibold text-ink">
-                {result.total} registro(s)
+      {error && (
+        <ErrorState
+          className="min-h-[260px] justify-center bg-white"
+          title="No pudimos consultar la bitácora"
+          description={error}
+          onRetry={() => {
+            setError(null);
+            setReloadKey((key) => key + 1);
+          }}
+        />
+      )}
+
+      {!error && (
+        <section
+          aria-labelledby="audit-heading"
+          className="overflow-hidden rounded-xl border border-line bg-white"
+        >
+          <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
+            <div>
+              <h2 id="audit-heading" className="text-sm font-semibold text-ink">
+                Registros
               </h2>
-              <span className="text-xs text-muted">
-                Pagina {result.page} de{' '}
-                {Math.max(1, result.pageInfo.totalPages)}
-              </span>
-            </header>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[860px] text-left text-sm">
+              <p className="mt-0.5 text-xs text-muted" aria-live="polite">
+                {result
+                  ? `${result.total} ${
+                      result.total === 1 ? 'registro' : 'registros'
+                    }`
+                  : 'Consultando la bitácora…'}
+              </p>
+            </div>
+            {loading && result && (
+              <span className="text-[11px] text-muted">Actualizando…</span>
+            )}
+          </header>
+
+          {!result && loading && (
+            <div aria-busy="true">
+              <span className="sr-only">Cargando registros de auditoría…</span>
+              <table className="w-full">
+                <tbody>
+                  <SkeletonRows rows={7} columns={5} />
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {result && result.items.length === 0 && (
+            <div className="p-5">
+              <EmptyState
+                title="Sin registros para estos filtros"
+                description={
+                  hasFilters
+                    ? 'Prueba con un rango de fechas más amplio o quita algún criterio.'
+                    : 'La bitácora se llenará a medida que se realicen acciones en la plataforma.'
+                }
+                action={
+                  hasFilters ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={clearFilters}
+                    >
+                      Limpiar filtros
+                    </Button>
+                  ) : undefined
+                }
+              />
+            </div>
+          )}
+
+          {result && result.items.length > 0 && (
+            <TableShell
+              className="rounded-none border-0"
+              footer={
+                <Pager
+                  page={result.page}
+                  pageCount={pageCount}
+                  busy={loading}
+                  onPrev={() => setPage((current) => Math.max(1, current - 1))}
+                  onNext={() => setPage((current) => current + 1)}
+                />
+              }
+            >
+              <table className="w-full min-w-[880px] border-collapse">
+                <caption className="sr-only">
+                  Registros de auditoría con fecha, actor, acción, objetivo e IP
+                  de origen
+                </caption>
                 <thead>
-                  <tr className="border-b border-line bg-surface text-[11px] font-semibold uppercase tracking-wide text-muted">
-                    <th className="px-5 py-2.5">Fecha</th>
-                    <th className="px-3 py-2.5">Actor</th>
-                    <th className="px-3 py-2.5">Accion</th>
-                    <th className="px-3 py-2.5">Objetivo</th>
-                    <th className="px-3 py-2.5">IP</th>
+                  <tr className="border-b border-line bg-surface-2">
+                    <Th className="px-5">Fecha</Th>
+                    <Th>Actor</Th>
+                    <Th>Acción</Th>
+                    <Th>Objetivo</Th>
+                    <Th className="px-5">IP</Th>
                   </tr>
                 </thead>
                 <tbody>
                   {result.items.map((entry) => (
                     <tr
                       key={entry.logId}
-                      className="border-b border-line/70 last:border-0"
+                      className="border-b border-line/70 transition-colors duration-150 hover:bg-surface-2"
                     >
-                      <td className="px-5 py-3 text-xs text-muted">
-                        {new Date(entry.timestamp).toLocaleString('es-MX')}
-                      </td>
-                      <td className="px-3 py-3">
-                        <span className="block text-ink">{entry.actorName}</span>
-                        <span className="block text-[11px] text-muted">
+                      <Td className="whitespace-nowrap px-5 text-[11.5px] text-muted">
+                        {TIMESTAMP_FORMAT.format(new Date(entry.timestamp))}
+                      </Td>
+                      <Td>
+                        <span className="block text-[12.5px] text-ink">
+                          {entry.actorName}
+                        </span>
+                        <span className="block font-mono text-[10.5px] text-muted">
                           {entry.actorId}
                         </span>
-                      </td>
-                      <td className="px-3 py-3 font-mono text-xs text-ink">
-                        {entry.action}
-                      </td>
-                      <td className="px-3 py-3 font-mono text-xs text-muted">
+                      </Td>
+                      <Td>
+                        <span className="rounded border border-line bg-surface-2 px-1.5 py-0.5 font-mono text-[11px] text-ink">
+                          {entry.action}
+                        </span>
+                      </Td>
+                      <Td className="font-mono text-[11px] text-muted">
                         {entry.targetId}
-                      </td>
-                      <td className="px-3 py-3 text-xs text-muted">
+                      </Td>
+                      <Td className="px-5 font-mono text-[11px] text-muted">
                         {entry.sourceIp}
-                      </td>
+                      </Td>
                     </tr>
                   ))}
-                  {result.items.length === 0 && (
-                    <tr>
-                      <td
-                        colSpan={5}
-                        className="px-5 py-10 text-center text-sm text-muted"
-                      >
-                        No hay registros con los filtros aplicados.
-                      </td>
-                    </tr>
-                  )}
                 </tbody>
               </table>
-            </div>
-            <footer className="flex items-center justify-between border-t border-line px-5 py-3">
-              <button
-                type="button"
-                disabled={!result.pageInfo.hasPreviousPage}
-                onClick={() => setPage((current) => Math.max(1, current - 1))}
-                className="rounded-md border border-line px-3 py-1.5 text-xs font-medium text-ink disabled:opacity-40"
-              >
-                Anterior
-              </button>
-              <button
-                type="button"
-                disabled={!result.pageInfo.hasNextPage}
-                onClick={() => setPage((current) => current + 1)}
-                className="rounded-md border border-line px-3 py-1.5 text-xs font-medium text-ink disabled:opacity-40"
-              >
-                Siguiente
-              </button>
-            </footer>
-          </section>
-        )}
-      </div>
-    </main>
-  );
-}
+            </TableShell>
+          )}
+        </section>
+      )}
 
-function Field({
-  label,
-  value,
-  onChange,
-  placeholder,
-  type = 'text',
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-  type?: 'text' | 'date';
-}) {
-  return (
-    <label className="block text-xs font-medium text-ink">
-      {label}
-      <input
-        type={type}
-        value={value}
-        placeholder={placeholder}
-        onChange={(event) => onChange(event.target.value)}
-        className="mt-1 w-full rounded-md border border-line px-3 py-2 text-sm text-ink focus:border-brand-400 focus:outline-none"
-      />
-    </label>
+      <Alert tone="info">
+        La bitácora es append-only: cada registro conserva actor, fecha, objetivo
+        e IP de origen, y no puede modificarse desde la aplicación.
+      </Alert>
+    </div>
   );
 }

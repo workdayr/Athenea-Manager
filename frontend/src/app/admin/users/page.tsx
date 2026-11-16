@@ -1,9 +1,23 @@
 'use client';
 
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { AuthedShell } from '@/components/dashboard/authed-shell';
+import { Alert } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Breadcrumbs } from '@/components/ui/breadcrumbs';
+import { Button, ButtonLink } from '@/components/ui/button';
+import { SectionCard } from '@/components/ui/card';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import { Input, Select } from '@/components/ui/field';
+import { ConfirmDialog } from '@/components/ui/modal';
+import { NoAccess } from '@/components/ui/no-access';
+import { PageHeader } from '@/components/ui/page-header';
+import { Pager } from '@/components/ui/pager';
+import { SkeletonRows } from '@/components/ui/skeleton';
+import { TableShell, Td, Th } from '@/components/ui/table';
 import { useToast } from '@/components/ui/toast-provider';
+import { formatDate, ROLE_LABELS, type PlatformRole } from '@/lib/dashboard';
 import {
   changeUserRole,
   fetchAdminUsers,
@@ -14,102 +28,90 @@ import {
   type AdminUserPage,
 } from '@/lib/admin';
 import { graphqlErrorCode } from '@/lib/apollo-client';
-import { authClient } from '@/lib/auth-client';
-import { ROLE_LABELS, type PlatformRole } from '@/lib/dashboard';
 
 const PAGE_SIZE = 20;
 
+const EMPTY_FILTERS: AdminUserFilters = {
+  search: '',
+  role: '',
+  lockedOnly: false,
+  emailVerified: undefined,
+};
+
 /**
- * F1-07 / RF-001: gestion de usuarios y roles (solo ADMINISTRATOR).
- * El rol nunca se autoasigna desde el cliente: esta pantalla exige sesion
- * administrativa y el backend vuelve a validar rol, ultimo administrador
- * y auditoria.
+ * F1-07 / RF-001: gestión de usuarios y roles (solo ADMINISTRATOR).
+ * El rol nunca se autoasigna desde el cliente: esta pantalla exige sesión
+ * administrativa y el backend vuelve a validar rol, último administrador
+ * y auditoría.
  */
 export default function AdminUsersPage() {
-  const router = useRouter();
-  const toast = useToast();
-  const [checking, setChecking] = useState(true);
-  const [denied, setDenied] = useState(false);
+  return (
+    <AuthedShell
+      activeId="usuarios"
+      searchPlaceholder="Buscar cuentas por nombre o correo…"
+    >
+      {(user) => <AdminUsersContent isAdmin={user.role === 'ADMINISTRATOR'} />}
+    </AuthedShell>
+  );
+}
 
-  const [filters, setFilters] = useState<AdminUserFilters>({
-    search: '',
-    role: '',
-    lockedOnly: false,
-    emailVerified: undefined,
-  });
-  const [applied, setApplied] = useState<AdminUserFilters>(filters);
+function AdminUsersContent({ isAdmin }: { isAdmin: boolean }) {
+  const toast = useToast();
+
+  const [filters, setFilters] = useState<AdminUserFilters>(EMPTY_FILTERS);
+  const [applied, setApplied] = useState<AdminUserFilters>(EMPTY_FILTERS);
   const [page, setPage] = useState(1);
   const [data, setData] = useState<AdminUserPage | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [draftRoles, setDraftRoles] = useState<Record<string, PlatformRole>>(
-    {},
-  );
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const [draftRoles, setDraftRoles] = useState<Record<string, PlatformRole>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [pendingRole, setPendingRole] = useState<{
+    user: AdminUser;
+    nextRole: PlatformRole;
+  } | null>(null);
+
+  // La carga se considera vigente cuando la clave de la consulta coincide con
+  // la última respuesta. Así no hace falta escribir `loading` dentro del
+  // efecto y la tabla conserva las filas anteriores mientras se actualiza.
+  const requestKey = `${page}|${JSON.stringify(applied)}|${reloadKey}`;
+  const loading = loadedKey !== requestKey;
 
   useEffect(() => {
+    if (!isAdmin) {
+      return;
+    }
+    const key = `${page}|${JSON.stringify(applied)}|${reloadKey}`;
     let active = true;
-    authClient.getSession().then(({ data: sessionData }) => {
-      if (!active) {
-        return;
-      }
-      const role = (sessionData?.user as { role?: string } | undefined)?.role;
-      if (!sessionData?.user) {
-        router.replace('/login');
-        return;
-      }
-      if (role !== 'ADMINISTRATOR') {
-        setDenied(true);
-        setChecking(false);
-        return;
-      }
-      setChecking(false);
-    });
+    fetchAdminUsers(applied, page, PAGE_SIZE)
+      .then((result) => {
+        if (!active) {
+          return;
+        }
+        setData(result);
+        setDraftRoles(
+          Object.fromEntries(result.items.map((user) => [user.id, user.role])),
+        );
+        setError(null);
+        setLoadedKey(key);
+      })
+      .catch((loadError: unknown) => {
+        if (!active) {
+          return;
+        }
+        setData(null);
+        setError(
+          graphqlErrorCode(loadError) === 'FORBIDDEN'
+            ? 'Tu cuenta no tiene permisos para administrar usuarios.'
+            : 'No fue posible cargar los usuarios. Revisa tu conexión e inténtalo de nuevo.',
+        );
+        setLoadedKey(key);
+      });
     return () => {
       active = false;
     };
-  }, [router]);
-
-  const load = useCallback(
-    async (targetPage: number, activeFilters: AdminUserFilters) => {
-      setLoading(true);
-      try {
-        const result = await fetchAdminUsers(
-          activeFilters,
-          targetPage,
-          PAGE_SIZE,
-        );
-        setData(result);
-        setDraftRoles(
-          Object.fromEntries(
-            result.items.map((user) => [user.id, user.role]),
-          ),
-        );
-      } catch (error) {
-        const code = graphqlErrorCode(error);
-        toast.error(
-          code === 'FORBIDDEN'
-            ? 'No tienes permisos para administrar usuarios.'
-            : 'No fue posible cargar los usuarios. Intenta de nuevo.',
-          'No se pudo cargar la lista',
-        );
-      } finally {
-        setLoading(false);
-      }
-    },
-    [toast],
-  );
-
-  useEffect(() => {
-    if (checking || denied) {
-      return;
-    }
-    // Diferido: la carga actualiza estado, fuera del cuerpo sincrono del
-    // efecto (evita renders en cascada).
-    const timer = setTimeout(() => {
-      void load(page, applied);
-    }, 0);
-    return () => clearTimeout(timer);
-  }, [checking, denied, page, applied, load]);
+  }, [applied, isAdmin, page, reloadKey]);
 
   function applyFilters() {
     setPage(1);
@@ -117,29 +119,18 @@ export default function AdminUsersPage() {
   }
 
   function clearFilters() {
-    const empty: AdminUserFilters = {
-      search: '',
-      role: '',
-      lockedOnly: false,
-      emailVerified: undefined,
-    };
-    setFilters(empty);
-    setApplied(empty);
+    setFilters(EMPTY_FILTERS);
+    setApplied(EMPTY_FILTERS);
     setPage(1);
   }
 
-  async function saveRole(user: AdminUser) {
-    const nextRole = draftRoles[user.id] ?? user.role;
-    if (nextRole === user.role) {
-      return;
-    }
-    if (
-      !window.confirm(
-        `¿Cambiar el rol de ${user.name} (${user.email}) de ${ROLE_LABELS[user.role]} a ${ROLE_LABELS[nextRole]}?`,
-      )
-    ) {
-      return;
-    }
+  const filtersDirty =
+    (filters.search ?? '') !== (applied.search ?? '') ||
+    (filters.role ?? '') !== (applied.role ?? '') ||
+    (filters.lockedOnly ?? false) !== (applied.lockedOnly ?? false) ||
+    filters.emailVerified !== applied.emailVerified;
+
+  async function saveRole(user: AdminUser, nextRole: PlatformRole) {
     setSavingId(user.id);
     try {
       const updated = await changeUserRole(user.id, nextRole);
@@ -161,19 +152,22 @@ export default function AdminUsersPage() {
         `El rol de ${updated.name} ahora es ${ROLE_LABELS[updated.role]}.`,
         'Rol actualizado',
       );
-    } catch (error) {
-      const code = graphqlErrorCode(error);
+    } catch (changeError: unknown) {
+      const code = graphqlErrorCode(changeError);
       if (code === 'LAST_ADMINISTRATOR') {
         toast.error(
           'No puedes quitar el rol al último administrador del sistema.',
           'Cambio bloqueado',
         );
       } else if (code === 'FORBIDDEN') {
-        toast.error('Solo un administrador puede cambiar roles.');
+        toast.error(
+          'Solo un administrador puede cambiar roles.',
+          'Cambio bloqueado',
+        );
       } else {
         toast.error(
-          error instanceof Error
-            ? error.message
+          changeError instanceof Error
+            ? changeError.message
             : 'No fue posible actualizar el rol. Intenta de nuevo.',
           'No se pudo actualizar el rol',
         );
@@ -181,65 +175,57 @@ export default function AdminUsersPage() {
       setDraftRoles((current) => ({ ...current, [user.id]: user.role }));
     } finally {
       setSavingId(null);
+      setPendingRole(null);
     }
   }
 
-  if (checking) {
+  if (!isAdmin) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-50">
-        <p className="text-sm text-gray-600">Verificando sesión…</p>
-      </main>
+      <NoAccess
+        title="Administración de cuentas reservada"
+        description="Solo la administración puede gestionar usuarios y roles. Si necesitas un cambio de rol, contacta a la Vicerrectoría de I+D+I."
+      />
     );
   }
 
-  if (denied) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
-        <section className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-8 text-center shadow-sm">
-          <h1 className="text-xl font-semibold text-gray-900">
-            Acceso denegado
-          </h1>
-          <p className="mt-2 text-sm text-gray-600">
-            Solo la administración puede gestionar usuarios y roles (RF-001).
-          </p>
-          <Link
-            href="/dashboard"
-            className="mt-4 inline-block text-sm font-medium text-blue-700 hover:underline"
-          >
-            Volver al panel
-          </Link>
-        </section>
-      </main>
-    );
-  }
-
-  const totalPages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
+  const totalPages = data
+    ? Math.max(1, Math.ceil(data.total / data.pageSize))
+    : 1;
+  const hasFilters =
+    applied.search !== '' ||
+    applied.role !== '' ||
+    applied.lockedOnly === true ||
+    applied.emailVerified !== undefined;
 
   return (
-    <main className="min-h-screen bg-gray-50 px-4 py-8">
-      <div className="mx-auto w-full max-w-6xl">
-        <p className="text-xs font-medium text-blue-700">
-          ADMINISTRACIÓN · RF-001 / BR-005
-        </p>
-        <h1 className="mt-1 text-2xl font-semibold text-gray-900">
-          Usuarios y roles
-        </h1>
-        <p className="mt-1 text-sm text-gray-600">
-          El rol determina los módulos y permisos de cada cuenta. Todo cambio
-          queda auditado y se notifica al usuario.
-        </p>
+    <div className="space-y-5">
+      <Breadcrumbs
+        items={[
+          { label: 'Panel', href: '/dashboard' },
+          { label: 'Usuarios y roles' },
+        ]}
+      />
 
-        <section className="mt-6 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+      <PageHeader
+        title="Usuarios y roles"
+        description="El rol define los módulos y permisos de cada cuenta. Cada cambio queda auditado y se notifica al usuario."
+        actions={
+          <ButtonLink href="/admin/audit" variant="secondary" size="sm">
+            Ver bitácora
+          </ButtonLink>
+        }
+      />
+
+      <SectionCard
+        title="Filtros"
+        description="Acota la lista por nombre, rol o estado de la cuenta."
+      >
+        <div className="space-y-4 px-5 py-4">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="lg:col-span-2">
-              <label
-                htmlFor="search"
-                className="mb-1 block text-sm font-medium text-gray-700"
-              >
-                Buscar por nombre o correo
-              </label>
-              <input
-                id="search"
+              <Input
+                id="user-search"
+                label="Buscar por nombre o correo"
                 type="search"
                 value={filters.search ?? ''}
                 onChange={(event) =>
@@ -249,72 +235,59 @@ export default function AdminUsersPage() {
                   }))
                 }
                 placeholder="ana@unipolidgo.edu.mx"
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-600 focus:outline-none"
               />
             </div>
-            <div>
-              <label
-                htmlFor="role"
-                className="mb-1 block text-sm font-medium text-gray-700"
-              >
-                Rol
-              </label>
-              <select
-                id="role"
-                value={filters.role ?? ''}
-                onChange={(event) =>
-                  setFilters((current) => ({
-                    ...current,
-                    role: event.target.value as PlatformRole | '',
-                  }))
-                }
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-600 focus:outline-none"
-              >
-                <option value="">Todos</option>
-                {ROLE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label
-                htmlFor="verification"
-                className="mb-1 block text-sm font-medium text-gray-700"
-              >
-                Verificación de correo
-              </label>
-              <select
-                id="verification"
-                value={
-                  filters.emailVerified === undefined
-                    ? ''
-                    : filters.emailVerified
-                      ? 'yes'
-                      : 'no'
-                }
-                onChange={(event) =>
-                  setFilters((current) => ({
-                    ...current,
-                    emailVerified:
-                      event.target.value === ''
-                        ? undefined
-                        : event.target.value === 'yes',
-                  }))
-                }
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-600 focus:outline-none"
-              >
-                <option value="">Todas</option>
-                <option value="yes">Verificados</option>
-                <option value="no">Sin verificar</option>
-              </select>
-            </div>
+            <Select
+              id="user-role"
+              label="Rol"
+              value={filters.role ?? ''}
+              onChange={(event) =>
+                setFilters((current) => ({
+                  ...current,
+                  role: event.target.value as PlatformRole | '',
+                }))
+              }
+            >
+              <option value="">Todos</option>
+              {ROLE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+            <Select
+              id="user-verification"
+              label="Verificación de correo"
+              value={
+                filters.emailVerified === undefined
+                  ? ''
+                  : filters.emailVerified
+                    ? 'yes'
+                    : 'no'
+              }
+              onChange={(event) =>
+                setFilters((current) => ({
+                  ...current,
+                  emailVerified:
+                    event.target.value === ''
+                      ? undefined
+                      : event.target.value === 'yes',
+                }))
+              }
+            >
+              <option value="">Todas</option>
+              <option value="yes">Verificados</option>
+              <option value="no">Sin verificar</option>
+            </Select>
           </div>
 
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-            <label className="flex items-center gap-2 text-sm text-gray-700">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <label
+              htmlFor="locked-only"
+              className="flex cursor-pointer items-center gap-2 text-[12.5px] text-ink"
+            >
               <input
+                id="locked-only"
                 type="checkbox"
                 checked={filters.lockedOnly === true}
                 onChange={(event) =>
@@ -323,95 +296,193 @@ export default function AdminUsersPage() {
                     lockedOnly: event.target.checked,
                   }))
                 }
+                className="h-4 w-4 accent-brand-700"
               />
-              Solo cuentas bloqueadas (RF-010)
+              Solo cuentas bloqueadas
             </label>
-            <div className="flex gap-2">
-              <button
-                type="button"
+
+            <div className="flex items-center gap-2">
+              {filtersDirty && (
+                <span className="text-[11px] text-warning">
+                  Cambios sin aplicar
+                </span>
+              )}
+              <Button
+                size="sm"
+                variant="ghost"
                 onClick={clearFilters}
-                className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                disabled={!hasFilters && !filtersDirty}
               >
                 Limpiar
-              </button>
-              <button
-                type="button"
-                onClick={applyFilters}
-                className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-              >
+              </Button>
+              <Button size="sm" onClick={applyFilters} disabled={!filtersDirty}>
                 Aplicar filtros
-              </button>
+              </Button>
             </div>
           </div>
-        </section>
+        </div>
+      </SectionCard>
 
-        <section className="mt-6 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-          {loading && !data ? (
-            <p className="px-4 py-6 text-sm text-gray-600">
-              Cargando usuarios…
-            </p>
-          ) : !data || data.items.length === 0 ? (
-            <p className="px-4 py-6 text-sm text-gray-600">
-              No hay usuarios que coincidan con los filtros.
-            </p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200 text-sm">
-                <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
-                  <tr>
-                    <th className="px-4 py-3 font-medium">Usuario</th>
-                    <th className="px-4 py-3 font-medium">Estado</th>
-                    <th className="px-4 py-3 font-medium">Alta</th>
-                    <th className="px-4 py-3 font-medium">Rol</th>
-                    <th className="px-4 py-3 font-medium">Acción</th>
+      {error && (
+        <ErrorState
+          className="min-h-[260px] justify-center bg-white"
+          title="No pudimos cargar los usuarios"
+          description={error}
+          onRetry={() => {
+            setError(null);
+            setReloadKey((key) => key + 1);
+          }}
+        />
+      )}
+
+      {!error && (
+        <section
+          aria-labelledby="users-heading"
+          className="overflow-hidden rounded-xl border border-line bg-white"
+        >
+          <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
+            <div>
+              <h2 id="users-heading" className="text-sm font-semibold text-ink">
+                Cuentas registradas
+              </h2>
+              <p className="mt-0.5 text-xs text-muted" aria-live="polite">
+                {data
+                  ? `${data.total} ${
+                      data.total === 1 ? 'cuenta' : 'cuentas'
+                    } en total`
+                  : 'Consultando cuentas…'}
+              </p>
+            </div>
+            {loading && data && (
+              <span className="text-[11px] text-muted">Actualizando…</span>
+            )}
+          </header>
+
+          {!data && loading && (
+            <div aria-busy="true">
+              <span className="sr-only">Cargando usuarios…</span>
+              <table className="w-full">
+                <tbody>
+                  <SkeletonRows rows={6} columns={5} />
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {data && data.items.length === 0 && (
+            <div className="p-5">
+              <EmptyState
+                title={
+                  hasFilters
+                    ? 'Ninguna cuenta coincide con los filtros'
+                    : 'Todavía no hay cuentas registradas'
+                }
+                description={
+                  hasFilters
+                    ? 'Ajusta los criterios de búsqueda o límpialos para ver todas las cuentas.'
+                    : 'Las cuentas aparecen aquí en cuanto completan su registro.'
+                }
+                action={
+                  hasFilters ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={clearFilters}
+                    >
+                      Limpiar filtros
+                    </Button>
+                  ) : undefined
+                }
+              />
+            </div>
+          )}
+
+          {data && data.items.length > 0 && (
+            <TableShell
+              className="rounded-none border-0"
+              footer={
+                <Pager
+                  page={data.page}
+                  pageCount={totalPages}
+                  busy={loading}
+                  onPrev={() => setPage((current) => Math.max(1, current - 1))}
+                  onNext={() => setPage((current) => current + 1)}
+                />
+              }
+            >
+              <table className="w-full min-w-[880px] border-collapse">
+                <caption className="sr-only">
+                  Cuentas de la plataforma con estado, fecha de alta y rol
+                  asignado
+                </caption>
+                <thead>
+                  <tr className="border-b border-line bg-surface-2">
+                    <Th className="px-5">Usuario</Th>
+                    <Th>Estado</Th>
+                    <Th>Alta</Th>
+                    <Th>Rol</Th>
+                    <Th className="px-5 text-right">Acción</Th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {data.items.map((user) => {
-                    const nextRole = draftRoles[user.id] ?? user.role;
-                    const changed = nextRole !== user.role;
+                <tbody>
+                  {data.items.map((item) => {
+                    const nextRole = draftRoles[item.id] ?? item.role;
+                    const changed = nextRole !== item.role;
+                    const saving = savingId === item.id;
+
                     return (
-                      <tr key={user.id}>
-                        <td className="px-4 py-3">
-                          <p className="font-medium text-gray-900">
-                            {user.name}
-                          </p>
-                          <p className="text-xs text-gray-500">{user.email}</p>
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex flex-col gap-1">
-                            <span
-                              className={
-                                user.emailVerified
-                                  ? 'inline-flex w-fit rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700'
-                                  : 'inline-flex w-fit rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800'
-                              }
+                      <tr
+                        key={item.id}
+                        className={`border-b border-line/70 transition-colors duration-150 ${
+                          changed ? 'bg-brand-50/60' : 'hover:bg-surface-2'
+                        }`}
+                      >
+                        <Td className="px-5">
+                          <span className="block text-[12.5px] font-medium text-ink">
+                            {item.name}
+                          </span>
+                          <span className="block text-[11px] text-muted">
+                            {item.email}
+                          </span>
+                        </Td>
+
+                        <Td>
+                          <div className="flex flex-col items-start gap-1">
+                            <Badge
+                              tone={item.emailVerified ? 'success' : 'warning'}
                             >
-                              {user.emailVerified
+                              {item.emailVerified
                                 ? 'Correo verificado'
                                 : 'Sin verificar'}
-                            </span>
-                            {isLocked(user) && (
-                              <span className="inline-flex w-fit rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">
-                                Bloqueada
-                              </span>
+                            </Badge>
+                            {isLocked(item) && (
+                              <Badge tone="danger">Bloqueada</Badge>
                             )}
                           </div>
-                        </td>
-                        <td className="px-4 py-3 text-gray-600">
-                          {new Date(user.createdAt).toLocaleDateString('es-MX')}
-                        </td>
-                        <td className="px-4 py-3">
+                        </Td>
+
+                        <Td className="whitespace-nowrap text-[12px] text-muted">
+                          {formatDate(item.createdAt)}
+                        </Td>
+
+                        <Td>
+                          <label
+                            className="sr-only"
+                            htmlFor={`role-${item.id}`}
+                          >
+                            Rol de {item.name}
+                          </label>
                           <select
-                            aria-label={`Rol de ${user.name}`}
+                            id={`role-${item.id}`}
                             value={nextRole}
+                            disabled={saving}
                             onChange={(event) =>
                               setDraftRoles((current) => ({
                                 ...current,
-                                [user.id]: event.target.value as PlatformRole,
+                                [item.id]: event.target.value as PlatformRole,
                               }))
                             }
-                            className="rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 focus:border-blue-600 focus:outline-none"
+                            className="h-8 rounded-lg border border-line-strong bg-white px-2 text-[11.5px] font-medium text-ink transition-colors duration-150 hover:border-brand-300 focus:border-brand-500 disabled:opacity-60"
                           >
                             {ROLE_OPTIONS.map((option) => (
                               <option key={option.value} value={option.value}>
@@ -419,61 +490,73 @@ export default function AdminUsersPage() {
                               </option>
                             ))}
                           </select>
-                        </td>
-                        <td className="px-4 py-3">
-                          <button
-                            type="button"
-                            disabled={!changed || savingId === user.id}
-                            onClick={() => void saveRole(user)}
-                            className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-40"
+                        </Td>
+
+                        <Td className="px-5 text-right">
+                          <Button
+                            size="sm"
+                            variant={changed ? 'primary' : 'secondary'}
+                            disabled={!changed || saving}
+                            loading={saving}
+                            onClick={() =>
+                              setPendingRole({ user: item, nextRole })
+                            }
                           >
-                            {savingId === user.id ? 'Guardando…' : 'Guardar'}
-                          </button>
-                        </td>
+                            {saving ? 'Guardando…' : 'Guardar'}
+                          </Button>
+                        </Td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
-            </div>
+            </TableShell>
           )}
         </section>
+      )}
 
-        <div className="mt-4 flex items-center justify-between text-sm text-gray-600">
-          <span>
-            {data
-              ? `${data.total} usuario(s) · página ${data.page} de ${totalPages}`
-              : '—'}
-          </span>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              disabled={!data || data.page <= 1 || loading}
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
-              className="rounded-md border border-gray-300 px-3 py-1.5 font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40"
-            >
-              Anterior
-            </button>
-            <button
-              type="button"
-              disabled={!data || data.page >= totalPages || loading}
-              onClick={() => setPage((current) => current + 1)}
-              className="rounded-md border border-gray-300 px-3 py-1.5 font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40"
-            >
-              Siguiente
-            </button>
-          </div>
-        </div>
+      <Alert tone="info" title="Cambios auditados">
+        Cada cambio de rol queda en la bitácora con el actor, la fecha y la IP de
+        origen. La administración nunca puede quitarse el rol a sí misma si es la
+        última cuenta con permisos.
+      </Alert>
 
-        <p className="mt-6 text-sm">
-          <Link
-            href="/dashboard"
-            className="font-medium text-blue-700 hover:underline"
-          >
-            ← Volver al panel
-          </Link>
-        </p>
-      </div>
-    </main>
+      <ConfirmDialog
+        open={pendingRole !== null}
+        onClose={() => {
+          if (savingId === null) {
+            setPendingRole(null);
+          }
+        }}
+        onConfirm={() => {
+          if (pendingRole) {
+            void saveRole(pendingRole.user, pendingRole.nextRole);
+          }
+        }}
+        title="Cambiar rol de la cuenta"
+        description={
+          pendingRole ? (
+            <>
+              <span className="font-medium text-ink">
+                {pendingRole.user.name}
+              </span>{' '}
+              ({pendingRole.user.email}) pasará de{' '}
+              <span className="font-medium text-ink">
+                {ROLE_LABELS[pendingRole.user.role]}
+              </span>{' '}
+              a{' '}
+              <span className="font-medium text-ink">
+                {ROLE_LABELS[pendingRole.nextRole]}
+              </span>
+              . El cambio aplica de inmediato y se notifica a la persona.
+            </>
+          ) : null
+        }
+        confirmLabel="Cambiar rol"
+        cancelLabel="Cancelar"
+        tone="primary"
+        loading={savingId !== null}
+      />
+    </div>
   );
 }

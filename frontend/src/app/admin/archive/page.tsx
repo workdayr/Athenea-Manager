@@ -1,11 +1,25 @@
 'use client';
 
+import { useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
+import { AuthedShell } from '@/components/dashboard/authed-shell';
+import { Icon } from '@/components/dashboard/icons';
+import { Alert } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Breadcrumbs } from '@/components/ui/breadcrumbs';
+import { Button, ButtonLink } from '@/components/ui/button';
+import { SectionCard } from '@/components/ui/card';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import { Input } from '@/components/ui/field';
+import { ConfirmDialog } from '@/components/ui/modal';
+import { NoAccess } from '@/components/ui/no-access';
+import { PageHeader } from '@/components/ui/page-header';
+import { Pager } from '@/components/ui/pager';
+import { SkeletonRows } from '@/components/ui/skeleton';
+import { TableShell, Td, Th } from '@/components/ui/table';
 import { useToast } from '@/components/ui/toast-provider';
-import { authClient } from '@/lib/auth-client';
-import { toPlatformRole } from '@/lib/dashboard';
+import { formatDate, STATUS_LABELS, type DashboardUser } from '@/lib/dashboard';
 import {
   archiveClosedProjects,
   archiveErrorMessage,
@@ -16,280 +30,383 @@ import {
   type ArchivedProjectPage,
 } from '@/lib/archive';
 
+const TIMESTAMP_FORMAT = new Intl.DateTimeFormat('es-MX', {
+  dateStyle: 'short',
+  timeStyle: 'short',
+});
+
 /** RF-020: expedientes archivados, alertas y reintento manual. */
 export default function AdminArchivePage() {
-  const router = useRouter();
+  return (
+    <AuthedShell
+      activeId="configuracion"
+      searchPlaceholder="Buscar expedientes archivados…"
+    >
+      {(user) => <AdminArchiveContent user={user} />}
+    </AuthedShell>
+  );
+}
+
+function AdminArchiveContent({ user }: { user: DashboardUser }) {
   const toast = useToast();
-  const [checking, setChecking] = useState(true);
+  const canManage = user.role === 'ADMINISTRATOR';
+
   const [data, setData] = useState<ArchivedProjectPage | null>(null);
-  const [alerts, setAlerts] = useState<ArchiveAlert[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [alerts, setAlerts] = useState<ArchiveAlert[] | null>(null);
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const [reloadKey, setReloadKey] = useState(0);
   const [projectId, setProjectId] = useState('');
+  const [projectIdError, setProjectIdError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pendingArchive, setPendingArchive] = useState<number | null>(null);
+  const [batchOpen, setBatchOpen] = useState(false);
+
+  const requestKey = `${page}|${reloadKey}`;
+  const loading = loadedKey !== requestKey;
 
   useEffect(() => {
+    if (!canManage) {
+      return;
+    }
+    const key = `${page}|${reloadKey}`;
     let active = true;
-    authClient
-      .getSession()
-      .then(({ data: session }) => {
+    Promise.all([
+      fetchArchivedProjects(page),
+      fetchArchiveAlerts(true),
+    ])
+      .then(([archived, alertRows]) => {
         if (!active) {
           return;
         }
-        if (!session?.user) {
-          router.replace('/login');
-          return;
-        }
-        if (
-          toPlatformRole((session.user as { role?: unknown }).role) !==
-          'ADMINISTRATOR'
-        ) {
-          router.replace('/access-denied');
-          return;
-        }
-        setChecking(false);
+        setData(archived);
+        setAlerts(alertRows);
+        setError(null);
+        setLoadedKey(key);
       })
-      .catch(() => {
-        if (active) {
-          router.replace('/login');
+      .catch((loadError: unknown) => {
+        if (!active) {
+          return;
         }
+        setData(null);
+        setAlerts(null);
+        setError(archiveErrorMessage(loadError));
+        setLoadedKey(key);
       });
     return () => {
       active = false;
     };
-  }, [router]);
+  }, [canManage, page, reloadKey]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [archived, alertRows] = await Promise.all([
-        fetchArchivedProjects(page),
-        fetchArchiveAlerts(true),
-      ]);
-      setData(archived);
-      setAlerts(alertRows);
-    } catch (loadError: unknown) {
-      setError(archiveErrorMessage(loadError));
-    } finally {
-      setLoading(false);
-    }
-  }, [page]);
-
-  useEffect(() => {
-    if (!checking) {
-      void load();
-    }
-  }, [checking, load]);
-
-  async function handleArchive(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const id = Number(projectId);
-    if (!Number.isInteger(id) || id <= 0) {
-      toast.error('Indica un ID de proyecto valido.');
-      return;
-    }
+  async function runArchive(id: number) {
     setBusy(true);
     try {
       const outcome = await archiveProject(id);
       if (outcome.status === 'archived') {
-        toast.success(`Proyecto ${id} archivado correctamente.`);
+        toast.success(
+          `El proyecto #${id} quedó congelado en solo lectura.`,
+          'Expediente archivado',
+        );
         setProjectId('');
-        await load();
+        setReloadKey((key) => key + 1);
       } else {
         toast.error(
-          `No se archivo: ${outcome.reason ?? outcome.error ?? outcome.status}.`,
+          `No se archivó: ${outcome.reason ?? outcome.error ?? outcome.status}.`,
+          'Archivado no completado',
         );
       }
     } catch (archiveError: unknown) {
-      toast.error(archiveErrorMessage(archiveError));
+      toast.error(
+        archiveErrorMessage(archiveError),
+        'No se pudo archivar el proyecto',
+      );
     } finally {
       setBusy(false);
+      setPendingArchive(null);
     }
   }
 
-  async function handleBatch() {
+  async function runBatch() {
     setBusy(true);
     try {
       const summary = await archiveClosedProjects();
       toast.success(
-        `Barrido completado: ${summary.archived} archivados, ` +
-          `${summary.skipped} omitidos, ${summary.failed} fallidos.`,
+        `${summary.archived} archivados · ${summary.skipped} omitidos · ${summary.failed} con error.`,
+        'Barrido completado',
       );
-      await load();
+      setReloadKey((key) => key + 1);
     } catch (batchError: unknown) {
-      toast.error(archiveErrorMessage(batchError));
+      toast.error(
+        archiveErrorMessage(batchError),
+        'El barrido no pudo completarse',
+      );
     } finally {
       setBusy(false);
+      setBatchOpen(false);
     }
   }
 
+  function handleRetry(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const id = Number(projectId);
+    if (!Number.isInteger(id) || id <= 0) {
+      setProjectIdError('Indica un identificador de proyecto válido.');
+      return;
+    }
+    setProjectIdError(null);
+    setPendingArchive(id);
+  }
+
+  if (!canManage) {
+    return (
+      <NoAccess
+        title="Archivo institucional reservado"
+        description="Solo la administración puede archivar expedientes y reintentar trabajos fallidos."
+      />
+    );
+  }
+
+  const pageCount = data ? Math.max(1, data.pageInfo.totalPages) : 1;
+  const unresolvedAlerts = alerts ?? [];
+
   return (
-    <main className="min-h-screen bg-surface px-4 py-8">
-      <div className="mx-auto w-full max-w-6xl">
-        <Link
-          href="/admin/audit"
-          className="text-xs font-semibold uppercase tracking-wide text-brand-700 hover:underline"
-        >
-          ← Bitacora de auditoria
-        </Link>
-        <div className="mt-3 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-ink">
-              Expedientes archivados
-            </h1>
-            <p className="mt-1 text-sm text-muted">
-              Proyectos cerrados, congelados en solo lectura con snapshot
-              verificable (RF-020).
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => void handleBatch()}
-            disabled={busy}
-            className="rounded-md border border-line bg-white px-3 py-2 text-xs font-semibold text-ink hover:bg-brand-50 disabled:opacity-50"
-          >
-            {busy ? 'Ejecutando…' : 'Archivar proyectos cerrados'}
-          </button>
-        </div>
+    <div className="space-y-5">
+      <Breadcrumbs
+        items={[
+          { label: 'Panel', href: '/dashboard' },
+          { label: 'Configuración y auditoría', href: '/admin/audit' },
+          { label: 'Expedientes archivados' },
+        ]}
+      />
 
-        <form
-          onSubmit={handleArchive}
-          className="mt-5 flex flex-wrap items-end gap-3 rounded-xl border border-line bg-white p-4 shadow-sm"
-        >
-          <label className="block text-xs font-medium text-ink">
-            Reintentar archivado por ID de proyecto
-            <input
-              type="number"
-              min={1}
-              value={projectId}
-              onChange={(event) => setProjectId(event.target.value)}
-              className="mt-1 w-48 rounded-md border border-line px-3 py-2 text-sm text-ink focus:border-brand-400 focus:outline-none"
-              placeholder="123"
-            />
-          </label>
-          <button
-            type="submit"
-            disabled={busy || !projectId}
-            className="rounded-md bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800 disabled:opacity-50"
-          >
-            Archivar proyecto
-          </button>
-        </form>
-
-        {alerts.length > 0 && (
-          <section className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
-            <h2 className="text-sm font-semibold text-amber-900">
-              Alertas de archivado sin resolver
-            </h2>
-            <ul className="mt-2 space-y-2">
-              {alerts.map((alert) => (
-                <li key={alert.alertId} className="text-xs text-amber-900">
-                  Proyecto {alert.projectId ?? '(job global)'} ·{' '}
-                  {new Date(alert.attemptedAt).toLocaleString('es-MX')} ·{' '}
-                  {alert.errorMessage}
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-
-        {loading && (
-          <p className="mt-6 text-sm text-muted">Cargando expedientes…</p>
-        )}
-        {!loading && error && (
-          <div className="mt-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-            <p>{error}</p>
-            <button
-              type="button"
-              onClick={() => void load()}
-              className="mt-2 rounded border border-red-300 px-3 py-1 text-xs font-medium"
+      <PageHeader
+        title="Expedientes archivados"
+        description="Proyectos cerrados y congelados en solo lectura, con un snapshot verificable. El archivado no se puede revertir desde la plataforma."
+        actions={
+          <>
+            <ButtonLink href="/admin/audit" variant="secondary" size="sm">
+              Ver bitácora
+            </ButtonLink>
+            <Button
+              size="sm"
+              onClick={() => setBatchOpen(true)}
+              disabled={busy}
+              leadingIcon={<Icon name="stamp" className="h-4 w-4" />}
             >
-              Reintentar
-            </button>
-          </div>
-        )}
+              Archivar cerrados
+            </Button>
+          </>
+        }
+      />
 
-        {!loading && !error && data && (
-          <section className="mt-5 overflow-hidden rounded-xl border border-line bg-white shadow-sm">
-            <header className="flex items-center justify-between border-b border-line px-5 py-3">
-              <h2 className="text-sm font-semibold text-ink">
-                {data.total} expediente(s)
+      {unresolvedAlerts.length > 0 && (
+        <Alert
+          tone="warning"
+          title={`${unresolvedAlerts.length} ${
+            unresolvedAlerts.length === 1
+              ? 'alerta de archivado'
+              : 'alertas de archivado'
+          } sin resolver`}
+        >
+          <ul className="space-y-1.5">
+            {unresolvedAlerts.map((alert) => (
+              <li key={alert.alertId} className="text-[12px]">
+                <span className="font-medium">
+                  Proyecto {alert.projectId ?? '(job global)'}
+                </span>{' '}
+                · {TIMESTAMP_FORMAT.format(new Date(alert.attemptedAt))} ·{' '}
+                {alert.errorMessage}
+              </li>
+            ))}
+          </ul>
+        </Alert>
+      )}
+
+      <form onSubmit={handleRetry} noValidate>
+        <SectionCard
+          title="Reintentar archivado"
+          description="Úsalo cuando un proyecto cerró pero el trabajo automático falló."
+        >
+          <div className="flex flex-wrap items-end gap-3 px-5 py-4">
+            <div className="w-full max-w-[220px]">
+              <Input
+                id="archive-project-id"
+                label="ID del proyecto"
+                type="number"
+                min={1}
+                value={projectId}
+                error={projectIdError ?? undefined}
+                onChange={(event) => {
+                  setProjectId(event.target.value);
+                  setProjectIdError(null);
+                }}
+                placeholder="123"
+              />
+            </div>
+            <Button type="submit" size="sm" disabled={busy || !projectId}>
+              Archivar proyecto
+            </Button>
+          </div>
+        </SectionCard>
+      </form>
+
+      {error && (
+        <ErrorState
+          className="min-h-[260px] justify-center bg-white"
+          title="No pudimos cargar los expedientes"
+          description={error}
+          onRetry={() => {
+            setError(null);
+            setReloadKey((key) => key + 1);
+          }}
+        />
+      )}
+
+      {!error && (
+        <section
+          aria-labelledby="archive-heading"
+          className="overflow-hidden rounded-xl border border-line bg-white"
+        >
+          <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
+            <div>
+              <h2 id="archive-heading" className="text-sm font-semibold text-ink">
+                Expedientes congelados
               </h2>
-              <span className="text-xs text-muted">
-                Pagina {data.page} de {Math.max(1, data.pageInfo.totalPages)}
-              </span>
-            </header>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] text-left text-sm">
+              <p className="mt-0.5 text-xs text-muted" aria-live="polite">
+                {data
+                  ? `${data.total} ${
+                      data.total === 1 ? 'expediente' : 'expedientes'
+                    }`
+                  : 'Consultando el archivo…'}
+              </p>
+            </div>
+            {loading && data && (
+              <span className="text-[11px] text-muted">Actualizando…</span>
+            )}
+          </header>
+
+          {!data && loading && (
+            <div aria-busy="true">
+              <span className="sr-only">Cargando expedientes archivados…</span>
+              <table className="w-full">
+                <tbody>
+                  <SkeletonRows rows={6} columns={4} />
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {data && data.items.length === 0 && (
+            <div className="p-5">
+              <EmptyState
+                icon={<Icon name="stamp" className="h-5 w-5" />}
+                title="Todavía no hay expedientes archivados"
+                description="Cuando un proyecto se cierre, el barrido automático lo congelará aquí con su snapshot verificable."
+              />
+            </div>
+          )}
+
+          {data && data.items.length > 0 && (
+            <TableShell
+              className="rounded-none border-0"
+              footer={
+                <Pager
+                  page={data.page}
+                  pageCount={pageCount}
+                  busy={loading}
+                  onPrev={() => setPage((current) => Math.max(1, current - 1))}
+                  onNext={() => setPage((current) => current + 1)}
+                />
+              }
+            >
+              <table className="w-full min-w-[780px] border-collapse">
+                <caption className="sr-only">
+                  Proyectos archivados con estado final, fecha de archivado y
+                  hash del snapshot
+                </caption>
                 <thead>
-                  <tr className="border-b border-line bg-surface text-[11px] font-semibold uppercase tracking-wide text-muted">
-                    <th className="px-5 py-2.5">Proyecto</th>
-                    <th className="px-3 py-2.5">Estado</th>
-                    <th className="px-3 py-2.5">Archivado</th>
-                    <th className="px-3 py-2.5">Hash del snapshot</th>
+                  <tr className="border-b border-line bg-surface-2">
+                    <Th className="px-5">Proyecto</Th>
+                    <Th>Estado final</Th>
+                    <Th>Archivado</Th>
+                    <Th className="px-5">Hash del snapshot</Th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.items.map((item) => (
                     <tr
                       key={item.projectId}
-                      className="border-b border-line/70 last:border-0"
+                      className="border-b border-line/70 transition-colors duration-150 hover:bg-surface-2"
                     >
-                      <td className="px-5 py-3">
+                      <Td className="px-5">
                         <Link
                           href={`/projects/${item.projectId}`}
-                          className="font-medium text-ink hover:underline"
+                          className="rounded text-[12.5px] font-medium text-ink transition-colors duration-150 hover:text-brand-700 hover:underline"
                         >
                           #{item.projectId} · {item.title}
                         </Link>
-                      </td>
-                      <td className="px-3 py-3 text-xs text-muted">
-                        {item.status}
-                      </td>
-                      <td className="px-3 py-3 text-xs text-muted">
-                        {new Date(item.archivedAt).toLocaleDateString('es-MX')}
-                      </td>
-                      <td className="px-3 py-3 font-mono text-[11px] text-muted">
-                        {item.snapshotHash.slice(0, 16)}…
-                      </td>
+                      </Td>
+                      <Td>
+                        <Badge tone="neutral">
+                          {STATUS_LABELS[item.status] ?? item.status}
+                        </Badge>
+                      </Td>
+                      <Td className="whitespace-nowrap text-[12px] text-muted">
+                        {formatDate(item.archivedAt)}
+                      </Td>
+                      <Td className="px-5">
+                        <code
+                          title={item.snapshotHash}
+                          className="rounded border border-line bg-surface-2 px-1.5 py-0.5 font-mono text-[10.5px] text-muted"
+                        >
+                          {item.snapshotHash.slice(0, 16)}…
+                        </code>
+                      </Td>
                     </tr>
                   ))}
-                  {data.items.length === 0 && (
-                    <tr>
-                      <td
-                        colSpan={4}
-                        className="px-5 py-10 text-center text-sm text-muted"
-                      >
-                        Todavia no hay proyectos archivados.
-                      </td>
-                    </tr>
-                  )}
                 </tbody>
               </table>
-            </div>
-            <footer className="flex items-center justify-between border-t border-line px-5 py-3">
-              <button
-                type="button"
-                disabled={!data.pageInfo.hasPreviousPage}
-                onClick={() => setPage((current) => Math.max(1, current - 1))}
-                className="rounded-md border border-line px-3 py-1.5 text-xs font-medium text-ink disabled:opacity-40"
-              >
-                Anterior
-              </button>
-              <button
-                type="button"
-                disabled={!data.pageInfo.hasNextPage}
-                onClick={() => setPage((current) => current + 1)}
-                className="rounded-md border border-line px-3 py-1.5 text-xs font-medium text-ink disabled:opacity-40"
-              >
-                Siguiente
-              </button>
-            </footer>
-          </section>
-        )}
-      </div>
-    </main>
+            </TableShell>
+          )}
+        </section>
+      )}
+
+      <ConfirmDialog
+        open={pendingArchive !== null}
+        onClose={() => {
+          if (!busy) {
+            setPendingArchive(null);
+          }
+        }}
+        onConfirm={() => {
+          if (pendingArchive !== null) {
+            void runArchive(pendingArchive);
+          }
+        }}
+        title={`Archivar el proyecto #${pendingArchive ?? ''}`}
+        description="El expediente quedará congelado en solo lectura con un snapshot verificable. No se puede revertir desde la plataforma."
+        confirmLabel="Archivar expediente"
+        cancelLabel="Cancelar"
+        tone="danger"
+        loading={busy}
+      />
+
+      <ConfirmDialog
+        open={batchOpen}
+        onClose={() => {
+          if (!busy) {
+            setBatchOpen(false);
+          }
+        }}
+        onConfirm={() => void runBatch()}
+        title="Archivar todos los proyectos cerrados"
+        description="El barrido recorre los proyectos cerrados y congela cada uno en solo lectura. Los que no cumplan los requisitos se omiten y quedan registrados en la bitácora."
+        confirmLabel="Ejecutar barrido"
+        cancelLabel="Cancelar"
+        tone="danger"
+        loading={busy}
+      />
+    </div>
   );
 }
