@@ -36,15 +36,16 @@ export function LifecycleFunnel({
         const numberStyles = isHighlighted
           ? 'border-brand-800 bg-brand-800 text-white'
           : step.state === 'done'
-            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+            ? 'border-success-line bg-success-soft text-success'
             : step.state === 'upcoming'
               ? 'border-line bg-white text-muted'
-              : 'border-[#dbe4f5] bg-white text-brand-700';
+              : 'border-brand-200 bg-white text-brand-700';
 
         const content = (
           <>
             <span
-              className={`grid h-8 w-8 shrink-0 place-items-center rounded-md border text-[12px] font-semibold ${numberStyles}`}
+              aria-hidden="true"
+              className={`grid h-8 w-8 shrink-0 place-items-center rounded-md border text-[12px] font-semibold tabular-nums transition-colors duration-150 ${numberStyles}`}
             >
               {step.id}
             </span>
@@ -55,15 +56,19 @@ export function LifecycleFunnel({
                     ? 'font-semibold text-ink'
                     : 'font-medium text-ink/90'
                 }`}
+                title={step.name}
               >
                 {step.name}
               </span>
-              <span className="block truncate text-[10.5px] text-muted">
+              <span
+                className="block truncate text-[10.5px] text-muted"
+                title={step.description}
+              >
                 {step.description}
               </span>
             </span>
             {mode === 'institutional' && step.count !== undefined && (
-              <span className="shrink-0 rounded-md border border-line bg-white px-2 py-0.5 text-[11px] font-semibold text-brand-800">
+              <span className="shrink-0 rounded-md border border-line bg-white px-2 py-0.5 text-[11px] font-semibold tabular-nums text-brand-800">
                 {step.count}
               </span>
             )}
@@ -71,10 +76,10 @@ export function LifecycleFunnel({
               <span
                 className={`shrink-0 rounded-full px-2 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide ${
                   step.state === 'done'
-                    ? 'bg-emerald-50 text-emerald-700'
+                    ? 'bg-success-soft text-success'
                     : step.state === 'current'
                       ? 'bg-brand-800 text-white'
-                      : 'bg-[#eef1f7] text-muted'
+                      : 'bg-surface-3 text-muted'
                 }`}
               >
                 {STATE_LABELS[step.state]}
@@ -83,13 +88,15 @@ export function LifecycleFunnel({
           </>
         );
 
-        const className = `flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition ${
+        const className = `flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-[background-color,border-color,box-shadow] duration-150 ease-snappy ${
           isHighlighted
-            ? 'border-brand-300 bg-brand-50 ring-1 ring-brand-200'
-            : 'border-[#e6edfa] bg-[#f5f8fe]'
-        } ${onSelect ? 'cursor-pointer hover:border-brand-200 hover:bg-brand-50' : ''} ${
-          selected ? 'border-brand-400' : ''
-        }`;
+            ? 'border-brand-300 bg-brand-50'
+            : 'border-line bg-surface-2'
+        } ${
+          onSelect
+            ? 'cursor-pointer hover:border-brand-300 hover:bg-brand-50 focus-visible:outline-brand-400'
+            : ''
+        } ${selected ? 'border-brand-400 ring-1 ring-brand-200' : ''}`;
 
         if (!onSelect) {
           return (

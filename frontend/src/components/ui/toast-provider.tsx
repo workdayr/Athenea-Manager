@@ -113,24 +113,24 @@ const VARIANT_STYLES: Record<
   { container: string; title: string; icon: string }
 > = {
   success: {
-    container: 'border-green-200 bg-green-50 text-green-900',
-    title: 'text-green-900',
-    icon: 'bg-green-600',
+    container: 'border-success-line bg-success-soft text-ink',
+    title: 'text-success',
+    icon: 'bg-success',
   },
   error: {
-    container: 'border-red-200 bg-red-50 text-red-900',
-    title: 'text-red-900',
-    icon: 'bg-red-600',
+    container: 'border-danger-line bg-danger-soft text-ink',
+    title: 'text-danger',
+    icon: 'bg-danger',
   },
   warning: {
-    container: 'border-amber-200 bg-amber-50 text-amber-900',
-    title: 'text-amber-900',
+    container: 'border-warning-line bg-warning-soft text-ink',
+    title: 'text-warning',
     icon: 'bg-amber-500',
   },
   info: {
-    container: 'border-blue-200 bg-blue-50 text-blue-900',
-    title: 'text-blue-900',
-    icon: 'bg-blue-600',
+    container: 'border-info-line bg-info-soft text-ink',
+    title: 'text-brand-800',
+    icon: 'bg-brand-600',
   },
 };
 
@@ -141,16 +141,23 @@ function ToastCard({
   toast: ToastItem;
   onDismiss: (id: string) => void;
 }) {
+  const [leaving, setLeaving] = useState(false);
+
   useEffect(() => {
     if (toast.durationMs <= 0) {
       return;
     }
-    const timer = window.setTimeout(
-      () => onDismiss(toast.id),
-      toast.durationMs,
-    );
+    const timer = window.setTimeout(() => setLeaving(true), toast.durationMs);
     return () => window.clearTimeout(timer);
-  }, [toast.id, toast.durationMs, onDismiss]);
+  }, [toast.durationMs]);
+
+  useEffect(() => {
+    if (!leaving) {
+      return;
+    }
+    const timer = window.setTimeout(() => onDismiss(toast.id), 160);
+    return () => window.clearTimeout(timer);
+  }, [leaving, onDismiss, toast.id]);
 
   const styles = VARIANT_STYLES[toast.variant];
   const role = toast.variant === 'error' ? 'alert' : 'status';
@@ -158,7 +165,7 @@ function ToastCard({
   return (
     <div
       role={role}
-      className={`pointer-events-auto flex items-start gap-3 rounded-lg border px-4 py-3 text-sm shadow-lg ${styles.container}`}
+      className={`pointer-events-auto flex items-start gap-3 rounded-lg border px-4 py-3 text-sm shadow-overlay transition-[opacity,transform] duration-150 ease-snappy ${leaving ? 'translate-y-1 opacity-0' : 'animate-fade-up'} ${styles.container}`}
     >
       <span
         aria-hidden="true"
@@ -174,9 +181,9 @@ function ToastCard({
       </div>
       <button
         type="button"
-        onClick={() => onDismiss(toast.id)}
+        onClick={() => setLeaving(true)}
         aria-label="Cerrar notificación"
-        className="shrink-0 rounded-md px-1.5 py-0.5 text-base leading-none opacity-70 transition hover:opacity-100"
+        className="shrink-0 rounded-md px-1.5 py-0.5 text-base leading-none opacity-70 transition hover:bg-ink/5 hover:opacity-100"
       >
         ×
       </button>

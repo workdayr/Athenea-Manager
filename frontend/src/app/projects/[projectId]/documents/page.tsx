@@ -1,9 +1,23 @@
 'use client';
 
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
+import { AuthedShell } from '@/components/dashboard/authed-shell';
+import { Icon } from '@/components/dashboard/icons';
+import { Alert } from '@/components/ui/alert';
+import { Badge, type BadgeTone } from '@/components/ui/badge';
+import { Breadcrumbs } from '@/components/ui/breadcrumbs';
+import { Button, ButtonLink } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import { Input, Select, Textarea } from '@/components/ui/field';
+import { ConfirmDialog, Modal } from '@/components/ui/modal';
+import { PageHeader } from '@/components/ui/page-header';
+import { Skeleton, SkeletonRows } from '@/components/ui/skeleton';
+import { Spinner } from '@/components/ui/spinner';
+import { TableShell, Td, Th } from '@/components/ui/table';
 import { useToast } from '@/components/ui/toast-provider';
-import { authClient } from '@/lib/auth-client';
+import { formatDate, type DashboardUser } from '@/lib/dashboard';
 import {
   ALLOWED_EXTENSIONS,
   MAX_FILE_BYTES,
@@ -34,57 +48,79 @@ import {
   visibilityErrorMessage,
   visibilityLabel,
   VISIBILITY_OPTIONS,
+  type DocumentReviewStatus,
   type DocumentVisibility,
   type ProjectDocument,
   type ProjectEthicsInfo,
 } from '@/lib/documents';
 
+type ReviewFilter = 'all' | DocumentReviewStatus;
+
+const REVIEW_FILTERS: Array<{ value: ReviewFilter; label: string }> = [
+  { value: 'all', label: 'Todos' },
+  { value: 'Pending', label: 'Pendientes' },
+  { value: 'Approved', label: 'Aprobados' },
+  { value: 'Rejected', label: 'Rechazados' },
+];
+
+const REVIEW_TONES: Record<DocumentReviewStatus, BadgeTone> = {
+  Pending: 'warning',
+  Approved: 'success',
+  Rejected: 'danger',
+};
+
+const VERSION_STATUS_LABELS: Record<string, string> = {
+  Submitted: 'Enviada al comité',
+  Under_Review: 'En revisión',
+  Approved: 'Aprobada',
+  Rejected: 'Rechazada',
+};
+
 /**
  * US 4.1 / RF-005: expediente documental del proyecto.
  *
  * - Lista los documentos que el backend autoriza para el rol actual
- *   (la administracion solo recibe los compartidos).
+ *   (la administración solo recibe los compartidos).
  * - El PI puede cambiar la visibilidad de cada documento, salvo los de
- *   revision obligatoria (protocolo y etica) y los proyectos ya
- *   cerrados/completados/rechazados.
- * - RF-016 / RNF-005: la evidencia se sube por REST (PDF, PNG, JPG, XLSX,
- *   max 25 MB) y nace como "Solo equipo"; el PI puede compartirla despues.
+ *   revisión obligatoria y los proyectos ya cerrados.
+ * - RF-016 / RNF-005: la evidencia se sube por REST y nace como "Solo
+ *   equipo"; el PI puede compartirla después.
  */
 export default function ProjectDocumentsPage() {
-  const router = useRouter();
+  return (
+    <AuthedShell
+      activeId="hitos"
+      searchPlaceholder="Buscar documentos, versiones o productos…"
+    >
+      {(user) => <DocumentsContent user={user} />}
+    </AuthedShell>
+  );
+}
+
+function DocumentsContent({ user }: { user: DashboardUser }) {
   const toast = useToast();
   const params = useParams<{ projectId: string }>();
   const projectId = Number(params?.projectId);
+  const validProjectId = Number.isInteger(projectId) && projectId > 0;
 
-  const [checking, setChecking] = useState(true);
-  const [isPrincipalInvestigator, setIsPrincipalInvestigator] = useState(false);
-  const [isReviewer, setIsReviewer] = useState(false);
-  const [documents, setDocuments] = useState<ProjectDocument[]>([]);
-  const [ethics, setEthics] = useState<ProjectEthicsInfo | null>(null);
-  const [loadingDocuments, setLoadingDocuments] = useState(true);
+  const isPrincipalInvestigator = user.role === 'PRINCIPAL_INVESTIGATOR';
+  const isReviewer =
+    user.role === 'ADMINISTRATOR' || user.role === 'COORDINATOR';
+
+  const [documents, setDocuments] = useState<ProjectDocument[] | null>(null);
   const [documentsError, setDocumentsError] = useState<string | null>(null);
+  const [ethics, setEthics] = useState<ProjectEthicsInfo | null>(null);
+  const [versions, setVersions] = useState<ProposalVersion[] | null>(null);
+  const [products, setProducts] = useState<ResearchProduct[] | null>(null);
+
+  const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('all');
   const [updatingId, setUpdatingId] = useState<number | null>(null);
   const [reviewingId, setReviewingId] = useState<number | null>(null);
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
   const [certifying, setCertifying] = useState(false);
 
-  // F1-03 & F1-04: Versiones y Productos
-  const [versions, setVersions] = useState<ProposalVersion[]>([]);
-  const [products, setProducts] = useState<ResearchProduct[]>([]);
-  const [newVersionComment, setNewVersionComment] = useState('');
-  const [newVersionFile, setNewVersionFile] = useState<File | null>(null);
-  const [uploadingVersion, setUploadingVersion] = useState(false);
-
-  const [newProductType, setNewProductType] = useState<ProductType>('JOURNAL_ARTICLE');
-  const [newProductUrl, setNewProductUrl] = useState('');
-  const [newProductTitle, setNewProductTitle] = useState('');
-  const [registeringProduct, setRegisteringProduct] = useState(false);
-  const [currentUserId, setCurrentUserId] = useState<string>('');
-
-  const [uploading, setUploading] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  // AIR-003: cuando se llega desde una cita del asistente, el enlace
-  // incluye #document-<id>; se resalta la fila correspondiente.
+  // AIR-003: cuando se llega desde una cita del asistente, el enlace incluye
+  // #document-<id>; se resalta la fila correspondiente.
   const [highlightedDocumentId] = useState<number | null>(() => {
     if (typeof window === 'undefined') {
       return null;
@@ -93,50 +129,53 @@ export default function ProjectDocumentsPage() {
     return match ? Number(match[1]) : null;
   });
 
-  useEffect(() => {
-    let active = true;
-    authClient.getSession().then(({ data }) => {
-      if (!active) {
-        return;
-      }
-      if (!data?.user) {
-        router.replace('/login');
-        return;
-      }
-      const userObj = data.user as { id?: string; role?: unknown };
-      setCurrentUserId(userObj.id ?? '');
-      setIsPrincipalInvestigator(userObj.role === 'PRINCIPAL_INVESTIGATOR');
-      setIsReviewer(userObj.role === 'ADMINISTRATOR' || userObj.role === 'COORDINATOR');
-      setChecking(false);
-    });
-    return () => {
-      active = false;
-    };
-  }, [router]);
+  // Diálogos
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
 
-  const validProjectId = Number.isInteger(projectId) && projectId > 0;
+  const [versionOpen, setVersionOpen] = useState(false);
+  const [newVersionFile, setNewVersionFile] = useState<File | null>(null);
+  const [newVersionComment, setNewVersionComment] = useState('');
+  const [versionError, setVersionError] = useState<string | null>(null);
+  const [uploadingVersion, setUploadingVersion] = useState(false);
+
+  const [productOpen, setProductOpen] = useState(false);
+  const [newProductType, setNewProductType] =
+    useState<ProductType>('JOURNAL_ARTICLE');
+  const [newProductUrl, setNewProductUrl] = useState('');
+  const [newProductTitle, setNewProductTitle] = useState('');
+  const [productError, setProductError] = useState<string | null>(null);
+  const [registeringProduct, setRegisteringProduct] = useState(false);
+
+  const [pendingReview, setPendingReview] = useState<{
+    documentId: number;
+    decision: 'Approved' | 'Rejected';
+    fileName: string;
+  } | null>(null);
+  const [certifyOpen, setCertifyOpen] = useState(false);
 
   const loadDocuments = useCallback(async () => {
     if (!validProjectId) {
       return;
     }
-    setLoadingDocuments(true);
-    setDocumentsError(null);
     try {
-      setDocuments(await fetchProjectDocuments(projectId));
+      const rows = await fetchProjectDocuments(projectId);
+      setDocuments(rows);
+      setDocumentsError(null);
     } catch (loadError: unknown) {
       setDocumentsError(visibilityErrorMessage(loadError));
-    } finally {
-      setLoadingDocuments(false);
     }
   }, [projectId, validProjectId]);
 
   useEffect(() => {
-    if (checking || !validProjectId) {
+    if (!validProjectId) {
       return;
     }
     let active = true;
-    // El detalle etico es informativo; si falla, la tabla sigue operativa.
+
+    // El detalle ético es informativo; si falla, la tabla sigue operativa.
     fetchProjectEthics(projectId)
       .then((info) => {
         if (active) {
@@ -144,6 +183,7 @@ export default function ProjectDocumentsPage() {
         }
       })
       .catch(() => undefined);
+
     fetchProjectDocuments(projectId)
       .then((rows) => {
         if (active) {
@@ -155,39 +195,45 @@ export default function ProjectDocumentsPage() {
         if (active) {
           setDocumentsError(visibilityErrorMessage(loadError));
         }
-      })
-      .finally(() => {
-        if (active) {
-          setLoadingDocuments(false);
-        }
       });
 
     fetchProposalVersions(projectId)
-      .then((vers) => {
-        if (active) setVersions(vers);
+      .then((rows) => {
+        if (active) {
+          setVersions(rows);
+        }
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (active) {
+          setVersions([]);
+        }
+      });
 
     fetchProjectProducts(projectId)
-      .then((prods) => {
-        if (active) setProducts(prods);
+      .then((rows) => {
+        if (active) {
+          setProducts(rows);
+        }
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (active) {
+          setProducts([]);
+        }
+      });
+
     return () => {
       active = false;
     };
-  }, [checking, projectId, validProjectId]);
+  }, [projectId, validProjectId]);
 
-  // El ancla se resuelve cuando los documentos ya estan en el DOM.
+  // El ancla se resuelve cuando los documentos ya están en el DOM.
   useEffect(() => {
-    if (!highlightedDocumentId || loadingDocuments || documentsError) {
+    if (!highlightedDocumentId || !documents) {
       return;
     }
-    const target = document.getElementById(
-      `document-${highlightedDocumentId}`,
-    );
+    const target = document.getElementById(`document-${highlightedDocumentId}`);
     target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, [highlightedDocumentId, loadingDocuments, documentsError, documents]);
+  }, [highlightedDocumentId, documents]);
 
   async function handleVisibilityChange(
     documentId: number,
@@ -201,15 +247,23 @@ export default function ProjectDocumentsPage() {
         visibility,
       );
       setDocuments((current) =>
-        current.map((document) =>
-          document.documentId === documentId
-            ? { ...document, ...updated }
-            : document,
-        ),
+        current
+          ? current.map((document) =>
+              document.documentId === documentId
+                ? { ...document, ...updated }
+                : document,
+            )
+          : current,
       );
-      toast.success('Visibilidad actualizada correctamente.');
+      toast.success(
+        `Visibilidad: ${visibilityLabel(visibility).toLowerCase()}.`,
+        'Cambio guardado',
+      );
     } catch (updateError: unknown) {
-      toast.error(visibilityErrorMessage(updateError));
+      toast.error(
+        visibilityErrorMessage(updateError),
+        'No se pudo cambiar la visibilidad',
+      );
     } finally {
       setUpdatingId(null);
     }
@@ -227,21 +281,28 @@ export default function ProjectDocumentsPage() {
         decision,
       );
       setDocuments((current) =>
-        current.map((document) =>
-          document.documentId === documentId
-            ? { ...document, ...updated }
-            : document,
-        ),
+        current
+          ? current.map((document) =>
+              document.documentId === documentId
+                ? { ...document, ...updated }
+                : document,
+            )
+          : current,
       );
       toast.success(
         decision === 'Approved'
-          ? 'Documento aprobado por la administración.'
-          : 'Documento rechazado; el equipo deberá corregirlo.',
+          ? 'El equipo verá el documento como aprobado.'
+          : 'El equipo deberá corregir y volver a subir el documento.',
+        decision === 'Approved' ? 'Documento aprobado' : 'Documento rechazado',
       );
     } catch (reviewError: unknown) {
-      toast.error(documentActionErrorMessage(reviewError));
+      toast.error(
+        documentActionErrorMessage(reviewError),
+        'No se pudo registrar la revisión',
+      );
     } finally {
       setReviewingId(null);
+      setPendingReview(null);
     }
   }
 
@@ -249,10 +310,13 @@ export default function ProjectDocumentsPage() {
     setDownloadingId(documentId);
     try {
       await downloadProjectDocument(documentId);
-      toast.success('Descarga iniciada.');
-    } catch (error) {
+      toast.success('La descarga del archivo comenzó.', 'Descarga iniciada');
+    } catch (error: unknown) {
       toast.error(
-        error instanceof Error ? error.message : 'Error al descargar el documento.',
+        error instanceof Error
+          ? error.message
+          : 'Error al descargar el documento.',
+        'No se pudo descargar',
       );
     } finally {
       setDownloadingId(null);
@@ -273,475 +337,890 @@ export default function ProjectDocumentsPage() {
           : current,
       );
       toast.success(
-        'Certificaste la anonimización de los datasets del proyecto (BR-012).',
+        'Los datasets del proyecto quedan marcados como anonimizados.',
+        'Certificación registrada',
       );
+      setCertifyOpen(false);
     } catch (certificationError: unknown) {
-      toast.error(documentActionErrorMessage(certificationError));
+      toast.error(
+        documentActionErrorMessage(certificationError),
+        'No se pudo certificar',
+      );
+      setCertifyOpen(false);
     } finally {
       setCertifying(false);
     }
   }
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedFile) {
-      toast.error('Selecciona un archivo.');
+      setUploadError('Selecciona el archivo que quieres cargar.');
       return;
     }
-    setUploading(true);
-    try {
-      await uploadEvidenceDocument(projectId, selectedFile);
-      toast.success(
-        `Archivo "${selectedFile.name}" subido como "Solo equipo". El Investigador Principal puede compartirlo con la administración desde la tabla.`,
-        'Evidencia cargada',
-      );
-      setSelectedFile(null);
-      await loadDocuments();
-    } catch (uploadError: unknown) {
-      toast.error(uploadErrorMessage(uploadError));
-    } finally {
-      setUploading(false);
+    if (selectedFile.size > MAX_FILE_BYTES) {
+      setUploadError('El archivo supera el máximo de 25 MB.');
+      return;
     }
+    void (async () => {
+      setUploading(true);
+      try {
+        await uploadEvidenceDocument(projectId, selectedFile);
+        toast.success(
+          `"${selectedFile.name}" se guardó como «Solo equipo». El Investigador Principal puede compartirlo cuando lo decida.`,
+          'Evidencia cargada',
+        );
+        setSelectedFile(null);
+        setUploadError(null);
+        setUploadOpen(false);
+        await loadDocuments();
+      } catch (uploadFailure: unknown) {
+        setUploadError(uploadErrorMessage(uploadFailure));
+      } finally {
+        setUploading(false);
+      }
+    })();
   }
 
-  async function handleUploadVersion(event: FormEvent<HTMLFormElement>) {
+  function handleUploadVersion(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!newVersionFile) {
-      toast.error('Adjunta al menos un archivo PDF para la versión revisada.');
+      setVersionError('Adjunta el PDF con la versión revisada.');
       return;
     }
-    setUploadingVersion(true);
-    try {
-      await uploadProposalVersion(projectId, newVersionComment, [
-        { file: newVersionFile, docType: 'methodology' },
-      ]);
-      toast.success('Nueva versión de propuesta enviada al comité de revisión.');
-      setNewVersionFile(null);
-      setNewVersionComment('');
-      await loadDocuments();
-      const updatedVersions = await fetchProposalVersions(projectId);
-      setVersions(updatedVersions);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Error al subir versión.');
-    } finally {
-      setUploadingVersion(false);
-    }
+    void (async () => {
+      setUploadingVersion(true);
+      try {
+        await uploadProposalVersion(projectId, newVersionComment, [
+          { file: newVersionFile, docType: 'methodology' },
+        ]);
+        toast.success(
+          'El comité recibirá la nueva versión para revisión.',
+          'Versión enviada',
+        );
+        setNewVersionFile(null);
+        setNewVersionComment('');
+        setVersionError(null);
+        setVersionOpen(false);
+        await loadDocuments();
+        setVersions(await fetchProposalVersions(projectId));
+      } catch (error: unknown) {
+        setVersionError(
+          error instanceof Error
+            ? error.message
+            : 'No se pudo enviar la versión.',
+        );
+      } finally {
+        setUploadingVersion(false);
+      }
+    })();
   }
 
-  async function handleRegisterProduct(event: FormEvent<HTMLFormElement>) {
+  function handleRegisterProduct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!newProductUrl) {
-      toast.error('Indica el URL o DOI del producto.');
+    if (!newProductUrl.trim()) {
+      setProductError('Indica el URL o DOI del producto.');
       return;
     }
-    setRegisteringProduct(true);
-    try {
-      await registerResearchOutput({
-        projectId,
-        productType: newProductType,
-        urlDoi: newProductUrl,
-        title: newProductTitle || undefined,
-        authors: [currentUserId],
-      });
-      toast.success('Producto de investigación registrado con éxito.');
-      setNewProductUrl('');
-      setNewProductTitle('');
-      const updatedProducts = await fetchProjectProducts(projectId);
-      setProducts(updatedProducts);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Error al registrar producto.');
-    } finally {
-      setRegisteringProduct(false);
-    }
+    void (async () => {
+      setRegisteringProduct(true);
+      try {
+        await registerResearchOutput({
+          projectId,
+          productType: newProductType,
+          urlDoi: newProductUrl.trim(),
+          title: newProductTitle.trim() || undefined,
+          authors: [user.id],
+        });
+        toast.success(
+          'El producto queda vinculado al expediente del proyecto.',
+          'Producto registrado',
+        );
+        setNewProductUrl('');
+        setNewProductTitle('');
+        setProductError(null);
+        setProductOpen(false);
+        setProducts(await fetchProjectProducts(projectId));
+      } catch (error: unknown) {
+        setProductError(
+          error instanceof Error
+            ? error.message
+            : 'No se pudo registrar el producto.',
+        );
+      } finally {
+        setRegisteringProduct(false);
+      }
+    })();
   }
+
+  if (!validProjectId) {
+    return (
+      <div className="space-y-6">
+        <Breadcrumbs
+          items={[
+            { label: 'Panel', href: '/dashboard' },
+            { label: 'Proyectos', href: '/projects' },
+            { label: 'Expediente' },
+          ]}
+        />
+        <ErrorState
+          className="min-h-[280px] justify-center bg-white"
+          title="El proyecto indicado no es válido"
+          description="El enlace no contiene un identificador de proyecto reconocible."
+          action={
+            <ButtonLink href="/projects" variant="secondary" size="sm">
+              Ver mis proyectos
+            </ButtonLink>
+          }
+        />
+      </div>
+    );
+  }
+
+  const filteredDocuments =
+    documents === null
+      ? null
+      : reviewFilter === 'all'
+        ? documents
+        : documents.filter((doc) => doc.reviewStatus === reviewFilter);
+
+  const pendingReviews =
+    documents?.filter((doc) => doc.reviewStatus === 'Pending').length ?? 0;
+  const showFilter = documents !== null && documents.length > 0;
 
   return (
-    <main className="min-h-screen bg-gray-50 px-4 py-8">
-      {checking && (
-        <div className="flex min-h-screen items-center justify-center">
-          <p className="text-sm text-gray-600">Verificando sesión…</p>
-        </div>
-      )}
-      {!checking && (
-        <div className="mx-auto w-full max-w-6xl">
-          <p className="text-xs font-medium text-blue-700">
-            EXPEDIENTE DOCUMENTAL · RF-005 / RF-016
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold text-gray-900">
-            Documentos · Proyecto #{projectId}
-          </h1>
-          <p className="mt-2 text-sm text-gray-600">
-            Configura qué documentos ve la administración. Los documentos de
-            revisión obligatoria (protocolo y aprobación de ética) siempre se
-            comparten. El informe final y la aprobación de ética requieren
-            revisión de la administración (BR-003).
-          </p>
+    <div className="space-y-5">
+      <Breadcrumbs
+        items={[
+          { label: 'Panel', href: '/dashboard' },
+          { label: 'Proyectos', href: '/projects' },
+          { label: `Proyecto #${projectId}`, href: `/projects/${projectId}` },
+          { label: 'Expediente' },
+        ]}
+      />
 
-          {ethics && ethics.researchInvolvesHumans && (
-            <section className="mt-6 rounded-xl border border-emerald-200 bg-emerald-50/60 p-6 shadow-sm">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                  <h2 className="text-lg font-semibold text-emerald-900">
-                    Anonimización de datasets (BR-012)
-                  </h2>
-                  <p className="mt-1 max-w-2xl text-sm text-emerald-900/80">
-                    Este proyecto involucra seres humanos. Antes de subir
-                    datasets XLSX, el Investigador Principal debe certificar que
-                    los datos están anonimizados.
-                  </p>
-                  {ethics.anonymizationCertified && (
-                    <p className="mt-2 text-sm font-medium text-emerald-800">
-                      Certificada
-                      {ethics.anonymizationCertifiedAt
-                        ? ` el ${new Date(
-                            ethics.anonymizationCertifiedAt,
-                          ).toLocaleDateString('es-MX')}`
-                        : ''}
-                      .
-                    </p>
-                  )}
-                </div>
-                {isPrincipalInvestigator && !ethics.anonymizationCertified && (
-                  <button
-                    type="button"
-                    onClick={() => void handleCertifyAnonymization()}
-                    disabled={certifying}
-                    className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
-                  >
-                    {certifying
-                      ? 'Certificando…'
-                      : 'Certificar anonimización'}
-                  </button>
-                )}
-              </div>
-            </section>
-          )}
+      <PageHeader
+        title="Expediente documental"
+        description="Documentos, versiones de la propuesta y productos de investigación del proyecto. El equipo controla qué ve la administración."
+        actions={
+          <>
+            <ButtonLink
+              href={`/projects/${projectId}`}
+              variant="secondary"
+              size="sm"
+            >
+              Ver proyecto
+            </ButtonLink>
+            <Button
+              size="sm"
+              onClick={() => setUploadOpen(true)}
+              leadingIcon={<Icon name="arrowUpRight" className="h-4 w-4" />}
+            >
+              Subir evidencia
+            </Button>
+          </>
+        }
+      />
 
-          <section className="mt-6 rounded-xl border border-gray-200 bg-white shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 px-6 py-4">
-              <h2 className="text-lg font-semibold text-gray-900">
-                Documentos del proyecto
-              </h2>
-              <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-medium text-gray-600">
-                {documents.length} documentos
-              </span>
-            </div>
-
-            {!validProjectId && (
-              <p className="px-6 py-8 text-sm text-red-700">
-                El proyecto indicado no es válido.
-              </p>
-            )}
-
-            {validProjectId && loadingDocuments && (
-              <p className="px-6 py-8 text-sm text-gray-600">
-                Cargando documentos…
-              </p>
-            )}
-
-            {validProjectId && !loadingDocuments && documentsError && (
-              <div className="px-6 py-8">
-                <p className="text-sm text-red-700">{documentsError}</p>
-                <button
-                  type="button"
-                  onClick={() => void loadDocuments()}
-                  className="mt-3 rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
-                >
-                  Reintentar
-                </button>
-              </div>
-            )}
-
-            {validProjectId && !loadingDocuments && !documentsError && (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[760px] border-collapse text-left">
-                  <caption className="sr-only">
-                    Documentos del proyecto con tipo, tamaño y visibilidad
-                  </caption>
-                  <thead>
-                    <tr className="border-b border-gray-200 bg-gray-50 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                      <th scope="col" className="px-6 py-3">
-                        Documento
-                      </th>
-                      <th scope="col" className="px-3 py-3">
-                        Tipo
-                      </th>
-                      <th scope="col" className="px-3 py-3">
-                        Carga
-                      </th>
-                      <th scope="col" className="px-3 py-3">
-                        Tamaño
-                      </th>
-                      <th scope="col" className="px-3 py-3">
-                        Visibilidad
-                      </th>
-                      <th scope="col" className="px-3 py-3">
-                        Revisión
-                      </th>
-                      <th scope="col" className="px-3 py-3 text-right">
-                        Descarga
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {documents.map((document) => (
-                      <DocumentTableRow
-                        key={document.documentId}
-                        document={document}
-                        isPrincipalInvestigator={isPrincipalInvestigator}
-                        isReviewer={isReviewer}
-                        updating={updatingId === document.documentId}
-                        reviewing={reviewingId === document.documentId}
-                        downloading={downloadingId === document.documentId}
-                        highlighted={highlightedDocumentId === document.documentId}
-                        onChangeVisibility={handleVisibilityChange}
-                        onReview={handleReview}
-                        onDownload={handleDownload}
-                      />
-                    ))}
-                    {documents.length === 0 && (
-                      <tr>
-                        <td
-                          colSpan={7}
-                          className="px-6 py-10 text-center text-sm text-gray-500"
-                        >
-                          Este proyecto todavía no tiene documentos.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            <div className="border-t border-gray-200 px-6 py-3">
-              <p className="text-xs leading-relaxed text-gray-500">
-                El backend valida la visibilidad en cada consulta: los usuarios
-                administrativos nunca reciben documentos marcados como “Solo
-                equipo”.
-              </p>
-            </div>
-          </section>
-
-          <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-            <h2 className="text-lg font-semibold text-gray-900">
-              Subir evidencia de trabajo
-            </h2>
-            <p className="mt-2 text-sm text-gray-600">
-              Formatos: {ALLOWED_EXTENSIONS.join(', ').toUpperCase()} · Máximo 25
-              MB. La evidencia se crea como “Solo equipo”; el Investigador
-              Principal puede compartirla después.
-            </p>
-            <form onSubmit={handleSubmit} className="mt-4 space-y-4" noValidate>
-              <input
-                type="file"
-                accept={ALLOWED_EXTENSIONS.map((extension) => `.${extension}`).join(',')}
-                onChange={(event) => {
-                  const file = event.target.files?.[0] ?? null;
-                  setSelectedFile(file);
-                  if (file && file.size > MAX_FILE_BYTES) {
-                    toast.error(
-                      `El archivo excede los 25 MB permitidos (${Math.round(file.size / 1024 / 1024)} MB).`,
-                    );
-                  }
-                }}
-                className="block w-full text-sm text-gray-700 file:mr-4 file:rounded-md file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-blue-700 hover:file:bg-blue-100"
-              />
-              {selectedFile && (
-                <p className="text-sm text-gray-600">
-                  {selectedFile.name} · {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
-                </p>
-              )}
-              <button
-                type="submit"
-                disabled={!selectedFile || uploading}
-                className="w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+      {ethics?.researchInvolvesHumans && (
+        <Alert
+          tone={ethics.anonymizationCertified ? 'success' : 'warning'}
+          title={
+            ethics.anonymizationCertified
+              ? 'Anonimización certificada'
+              : 'Falta certificar la anonimización'
+          }
+          action={
+            isPrincipalInvestigator && !ethics.anonymizationCertified ? (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => setCertifyOpen(true)}
               >
-                {uploading ? 'Subiendo y analizando…' : 'Subir documento'}
-              </button>
-            </form>
-          </section>
+                Certificar
+              </Button>
+            ) : undefined
+          }
+        >
+          Este proyecto involucra seres humanos. Antes de subir datasets XLSX,
+          el Investigador Principal debe certificar que los datos están
+          anonimizados.
+          {ethics.anonymizationCertified &&
+            ethics.anonymizationCertifiedAt &&
+            ` Certificada el ${formatDate(ethics.anonymizationCertifiedAt)}.`}
+        </Alert>
+      )}
 
-          {/* F1-03: Historial de versiones de la propuesta */}
-          <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-            <h2 className="text-lg font-semibold text-gray-900">
-              Historial de versiones de la propuesta (RF-004)
+      <section
+        aria-labelledby="documents-heading"
+        className="overflow-hidden rounded-xl border border-line bg-white"
+      >
+        <header className="flex flex-wrap items-start justify-between gap-3 border-b border-line px-5 py-4">
+          <div>
+            <h2
+              id="documents-heading"
+              className="text-sm font-semibold text-ink"
+            >
+              Documentos del proyecto
             </h2>
-            <p className="mt-1 text-sm text-gray-600">
-              Versiones revisadas del protocolo y propuesta tras dictamen del comité.
+            <p className="mt-0.5 text-xs text-muted">
+              {documents === null
+                ? 'Consultando el expediente…'
+                : `${documents.length} ${
+                    documents.length === 1 ? 'archivo' : 'archivos'
+                  }${pendingReviews > 0 ? ` · ${pendingReviews} por revisar` : ''}`}
             </p>
+          </div>
 
-            {versions.length > 0 ? (
-              <div className="mt-4 divide-y divide-gray-100 rounded-lg border border-gray-100">
-                {versions.map((ver) => (
-                  <div key={ver.versionId} className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <span className="font-semibold text-gray-900">Versión #{ver.versionNumber}</span>
-                        <span className="ml-2 text-xs text-gray-500">
-                          {new Date(ver.submittedAt).toLocaleDateString('es-MX')}
-                        </span>
-                      </div>
-                      <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
-                        {ver.status}
-                      </span>
-                    </div>
-                    {ver.committeeComments && (
-                      <p className="mt-2 text-xs text-gray-600">
-                        <strong>Comentarios del comité:</strong> {ver.committeeComments}
-                      </p>
-                    )}
-                    {ver.documents.length > 0 && (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {ver.documents.map((d) => (
-                          <span
-                            key={d.documentId}
-                            className="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-1 text-xs text-gray-700"
-                          >
-                            {d.fileName ?? `Documento #${d.documentId}`} (v{d.version})
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="mt-4 text-sm text-gray-500">No hay versiones registradas aún.</p>
-            )}
-
-            {isPrincipalInvestigator && (
-              <form onSubmit={handleUploadVersion} className="mt-6 border-t border-gray-100 pt-4 space-y-4">
-                <h3 className="text-sm font-semibold text-gray-800">
-                  Subir versión revisada (requiere dictamen Revision_Required)
-                </h3>
-                <input
-                  type="file"
-                  accept=".pdf"
-                  onChange={(e) => setNewVersionFile(e.target.files?.[0] ?? null)}
-                  className="block w-full text-sm text-gray-700 file:mr-4 file:rounded-md file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-blue-700 hover:file:bg-blue-100"
-                />
-                <textarea
-                  value={newVersionComment}
-                  onChange={(e) => setNewVersionComment(e.target.value)}
-                  placeholder="Comentario sobre los cambios realizados (opcional)..."
-                  rows={2}
-                  className="w-full rounded-md border border-gray-300 p-2 text-sm text-gray-800 focus:border-blue-500 focus:outline-none"
-                />
+          {showFilter && (
+            <div
+              role="group"
+              aria-label="Filtrar documentos por estado de revisión"
+              className="flex flex-wrap gap-1.5"
+            >
+              {REVIEW_FILTERS.map((filter) => (
                 <button
-                  type="submit"
-                  disabled={!newVersionFile || uploadingVersion}
-                  className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                  key={filter.value}
+                  type="button"
+                  onClick={() => setReviewFilter(filter.value)}
+                  aria-pressed={reviewFilter === filter.value}
+                  className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-[background-color,border-color,color] duration-150 ease-snappy ${
+                    reviewFilter === filter.value
+                      ? 'border-brand-800 bg-brand-800 text-white'
+                      : 'border-line bg-white text-muted hover:border-brand-300 hover:text-brand-800'
+                  }`}
                 >
-                  {uploadingVersion ? 'Subiendo versión…' : 'Enviar versión revisada'}
+                  {filter.label}
                 </button>
-              </form>
-            )}
-          </section>
+              ))}
+            </div>
+          )}
+        </header>
 
-          {/* F1-04: Productos de investigación */}
-          <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-            <h2 className="text-lg font-semibold text-gray-900">
-              Productos de investigación (RF-007 / BR-009)
-            </h2>
-            <p className="mt-1 text-sm text-gray-600">
-              Artículos, ponencias, software, patentes o tesis derivados del proyecto.
-            </p>
+        {documentsError && (
+          <div className="p-5">
+            <ErrorState
+              compact
+              title="No pudimos cargar los documentos"
+              description={documentsError}
+              onRetry={() => {
+                setDocumentsError(null);
+                void loadDocuments();
+              }}
+            />
+          </div>
+        )}
 
-            {products.length > 0 ? (
-              <div className="mt-4 divide-y divide-gray-100 rounded-lg border border-gray-100">
-                {products.map((prod) => (
-                  <div key={prod.productId} className="p-4">
-                    <div className="flex items-center justify-between">
-                      <span className="font-semibold text-gray-900">
-                        {prod.title ?? PRODUCT_TYPE_LABELS[prod.productType]}
-                      </span>
-                      <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
-                        {PRODUCT_TYPE_LABELS[prod.productType] ?? prod.productType}
-                      </span>
-                    </div>
-                    <a
-                      href={prod.urlDoi.startsWith('10.') ? `https://doi.org/${prod.urlDoi}` : prod.urlDoi}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-1 block text-xs text-blue-600 hover:underline"
-                    >
-                      {prod.urlDoi}
-                    </a>
-                    {prod.authors.length > 0 && (
-                      <p className="mt-1 text-xs text-gray-500">
-                        Autores: {prod.authors.map((a) => a.name).join(', ')}
-                      </p>
-                    )}
-                  </div>
+        {!documentsError && documents === null && <DocumentsSkeleton />}
+
+        {!documentsError && filteredDocuments && filteredDocuments.length === 0 && (
+          <div className="p-5">
+            <EmptyState
+              title={
+                documents && documents.length > 0
+                  ? 'Ningún documento tiene este estado'
+                  : 'El expediente está vacío'
+              }
+              description={
+                documents && documents.length > 0
+                  ? 'Cambia el filtro para ver el resto de los archivos.'
+                  : 'Sube la evidencia de trabajo, el protocolo o la aprobación de ética para que el comité y la administración puedan revisarla.'
+              }
+              action={
+                documents && documents.length > 0 ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setReviewFilter('all')}
+                  >
+                    Ver todos
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    onClick={() => setUploadOpen(true)}
+                    leadingIcon={<Icon name="arrowUpRight" className="h-4 w-4" />}
+                  >
+                    Subir el primer documento
+                  </Button>
+                )
+              }
+            />
+          </div>
+        )}
+
+        {!documentsError && filteredDocuments && filteredDocuments.length > 0 && (
+          <TableShell
+            className="rounded-none border-0"
+            footer={
+              <p className="text-[11px] leading-relaxed text-muted">
+                La administración nunca recibe los documentos marcados como
+                «Solo equipo». Los documentos de revisión obligatoria siempre se
+                comparten.
+              </p>
+            }
+          >
+            <table className="w-full min-w-[820px] border-collapse">
+              <caption className="sr-only">
+                Documentos del proyecto con tipo, fecha de carga, visibilidad y
+                estado de revisión
+              </caption>
+              <thead>
+                <tr className="border-b border-line bg-surface-2">
+                  <Th className="px-5">Documento</Th>
+                  <Th>Tipo</Th>
+                  <Th>Carga</Th>
+                  <Th>Visibilidad</Th>
+                  <Th>Revisión</Th>
+                  <Th className="px-5 text-right">Archivo</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredDocuments.map((document) => (
+                  <DocumentRow
+                    key={document.documentId}
+                    document={document}
+                    isReviewer={isReviewer}
+                    updating={updatingId === document.documentId}
+                    reviewing={reviewingId === document.documentId}
+                    downloading={downloadingId === document.documentId}
+                    highlighted={highlightedDocumentId === document.documentId}
+                    onChangeVisibility={handleVisibilityChange}
+                    onReview={(documentId, decision) =>
+                      setPendingReview({
+                        documentId,
+                        decision,
+                        fileName:
+                          document.fileName ?? `Documento #${documentId}`,
+                      })
+                    }
+                    onDownload={handleDownload}
+                  />
                 ))}
+              </tbody>
+            </table>
+          </TableShell>
+        )}
+      </section>
+
+      <section
+        aria-labelledby="versions-heading"
+        className="overflow-hidden rounded-xl border border-line bg-white"
+      >
+        <header className="flex flex-wrap items-start justify-between gap-3 border-b border-line px-5 py-4">
+          <div>
+            <h2 id="versions-heading" className="text-sm font-semibold text-ink">
+              Versiones de la propuesta
+            </h2>
+            <p className="mt-0.5 text-xs text-muted">
+              Entregas revisadas del protocolo tras un dictamen que pide
+              correcciones.
+            </p>
+          </div>
+          {isPrincipalInvestigator && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setVersionOpen(true)}
+              leadingIcon={<Icon name="arrowUpRight" className="h-3.5 w-3.5" />}
+            >
+              Subir versión revisada
+            </Button>
+          )}
+        </header>
+
+        {versions === null && (
+          <div aria-busy="true" className="space-y-3 px-5 py-5">
+            <span className="sr-only">Cargando versiones…</span>
+            {[0, 1].map((index) => (
+              <div key={index} aria-hidden="true" className="space-y-1.5">
+                <Skeleton className="h-3 w-40" />
+                <Skeleton className="h-2.5 w-64 max-w-full" />
               </div>
-            ) : (
-              <p className="mt-4 text-sm text-gray-500">
-                No se han registrado productos de investigación en este proyecto.
+            ))}
+          </div>
+        )}
+
+        {versions && versions.length === 0 && (
+          <div className="p-5">
+            <EmptyState
+              compact
+              title="Sin versiones registradas"
+              description="Cuando el comité solicite correcciones, la versión revisada que envíes quedará listada aquí con sus comentarios."
+            />
+          </div>
+        )}
+
+        {versions && versions.length > 0 && (
+          <ul className="divide-y divide-line">
+            {versions.map((version) => (
+              <li key={version.versionId} className="px-5 py-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[13px] font-semibold text-ink">
+                    Versión {version.versionNumber}
+                  </span>
+                  <Badge
+                    tone={
+                      version.status === 'Approved'
+                        ? 'success'
+                        : version.status === 'Rejected'
+                          ? 'danger'
+                          : 'info'
+                    }
+                  >
+                    {VERSION_STATUS_LABELS[version.status] ?? version.status}
+                  </Badge>
+                  <span className="ml-auto text-[11px] text-muted">
+                    {formatDate(version.submittedAt)}
+                    {version.submitterName ? ` · ${version.submitterName}` : ''}
+                  </span>
+                </div>
+
+                {version.committeeComments && (
+                  <p className="mt-2 rounded-lg border border-line bg-surface-2 px-3 py-2 text-[12px] leading-relaxed text-ink">
+                    <span className="font-semibold">Comité: </span>
+                    {version.committeeComments}
+                  </p>
+                )}
+
+                {version.documents.length > 0 && (
+                  <ul className="mt-2 flex flex-wrap gap-1.5">
+                    {version.documents.map((document) => (
+                      <li
+                        key={document.documentId}
+                        className="inline-flex items-center gap-1 rounded-md border border-line bg-white px-2 py-1 text-[11px] text-muted"
+                      >
+                        <Icon name="doc" className="h-3 w-3" />
+                        {document.fileName ?? `Documento #${document.documentId}`}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section
+        aria-labelledby="products-heading"
+        className="overflow-hidden rounded-xl border border-line bg-white"
+      >
+        <header className="flex flex-wrap items-start justify-between gap-3 border-b border-line px-5 py-4">
+          <div>
+            <h2 id="products-heading" className="text-sm font-semibold text-ink">
+              Productos de investigación
+            </h2>
+            <p className="mt-0.5 text-xs text-muted">
+              Artículos, ponencias, software, patentes o tesis derivados del
+              proyecto.
+            </p>
+          </div>
+          {isPrincipalInvestigator && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setProductOpen(true)}
+              leadingIcon={<Icon name="plus" className="h-3.5 w-3.5" />}
+            >
+              Registrar producto
+            </Button>
+          )}
+        </header>
+
+        {products === null && (
+          <div aria-busy="true" className="space-y-3 px-5 py-5">
+            <span className="sr-only">Cargando productos…</span>
+            {[0, 1].map((index) => (
+              <div key={index} aria-hidden="true" className="space-y-1.5">
+                <Skeleton className="h-3 w-52" />
+                <Skeleton className="h-2.5 w-40" />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {products && products.length === 0 && (
+          <div className="p-5">
+            <EmptyState
+              compact
+              title="Sin productos registrados"
+              description="Registra el DOI o URL de cada publicación para que quede vinculada al expediente del proyecto."
+              action={
+                isPrincipalInvestigator ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setProductOpen(true)}
+                  >
+                    Registrar producto
+                  </Button>
+                ) : undefined
+              }
+            />
+          </div>
+        )}
+
+        {products && products.length > 0 && (
+          <ul className="divide-y divide-line">
+            {products.map((product) => (
+              <li key={product.productId} className="px-5 py-4">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <p className="min-w-0 text-[13px] font-semibold leading-snug text-ink">
+                    {product.title ?? PRODUCT_TYPE_LABELS[product.productType]}
+                  </p>
+                  <Badge tone="info">
+                    {PRODUCT_TYPE_LABELS[product.productType] ??
+                      product.productType}
+                  </Badge>
+                </div>
+                <a
+                  href={
+                    product.urlDoi.startsWith('10.')
+                      ? `https://doi.org/${product.urlDoi}`
+                      : product.urlDoi
+                  }
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-1 inline-flex items-center gap-1 rounded text-[12px] font-medium text-brand-700 transition-colors duration-150 hover:text-brand-800 hover:underline"
+                >
+                  {product.urlDoi}
+                  <Icon name="arrowUpRight" className="h-3 w-3" />
+                </a>
+                {product.authors.length > 0 && (
+                  <p className="mt-1 text-[11px] text-muted">
+                    {product.authors.map((author) => author.name).join(', ')}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* Subir evidencia */}
+      <Modal
+        open={uploadOpen}
+        onClose={() => {
+          if (uploading) {
+            return;
+          }
+          setUploadOpen(false);
+          setUploadError(null);
+        }}
+        title="Subir evidencia de trabajo"
+        description={`Formatos ${ALLOWED_EXTENSIONS.join(', ').toUpperCase()} · máximo 25 MB. El archivo nace como «Solo equipo».`}
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setUploadOpen(false);
+                setUploadError(null);
+              }}
+              disabled={uploading}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              form="upload-evidence-form"
+              loading={uploading}
+            >
+              {uploading ? 'Subiendo y analizando…' : 'Subir documento'}
+            </Button>
+          </>
+        }
+      >
+        <form
+          id="upload-evidence-form"
+          onSubmit={handleUpload}
+          className="space-y-4"
+          noValidate
+        >
+          <div>
+            <label
+              htmlFor="evidence-file"
+              className="mb-1.5 block text-[13px] font-medium text-ink"
+            >
+              Archivo<span className="ml-1 text-danger" aria-hidden="true">*</span>
+            </label>
+            <input
+              id="evidence-file"
+              type="file"
+              accept={ALLOWED_EXTENSIONS.map(
+                (extension) => `.${extension}`,
+              ).join(',')}
+              onChange={(event) => {
+                const file = event.target.files?.[0] ?? null;
+                setSelectedFile(file);
+                setUploadError(
+                  file && file.size > MAX_FILE_BYTES
+                    ? 'El archivo supera el máximo de 25 MB.'
+                    : null,
+                );
+              }}
+              aria-invalid={uploadError ? true : undefined}
+              aria-describedby={uploadError ? 'evidence-file-error' : undefined}
+              className="block w-full rounded-lg border border-line-strong bg-white text-[12px] text-muted file:mr-3 file:border-0 file:border-r file:border-line file:bg-surface-2 file:px-3 file:py-2.5 file:text-[12px] file:font-medium file:text-ink hover:file:bg-brand-50"
+            />
+            {uploadError && (
+              <p
+                id="evidence-file-error"
+                role="alert"
+                className="mt-1.5 text-xs font-medium text-danger"
+              >
+                {uploadError}
               </p>
             )}
-
-            {isPrincipalInvestigator && (
-              <form onSubmit={handleRegisterProduct} className="mt-6 border-t border-gray-100 pt-4 space-y-4">
-                <h3 className="text-sm font-semibold text-gray-800">
-                  Registrar nuevo producto (proyectos Active o Completed)
-                </h3>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700">Tipo de producto</label>
-                    <select
-                      value={newProductType}
-                      onChange={(e) => setNewProductType(e.target.value as ProductType)}
-                      className="mt-1 w-full rounded-md border border-gray-300 bg-white p-2 text-sm text-gray-800 focus:border-blue-500 focus:outline-none"
-                    >
-                      {Object.entries(PRODUCT_TYPE_LABELS).map(([val, label]) => (
-                        <option key={val} value={val}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700">URL o DOI</label>
-                    <input
-                      type="text"
-                      value={newProductUrl}
-                      onChange={(e) => setNewProductUrl(e.target.value)}
-                      placeholder="https://... o 10.xxxx/..."
-                      className="mt-1 w-full rounded-md border border-gray-300 p-2 text-sm text-gray-800 focus:border-blue-500 focus:outline-none"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700">Título (opcional)</label>
-                  <input
-                    type="text"
-                    value={newProductTitle}
-                    onChange={(e) => setNewProductTitle(e.target.value)}
-                    placeholder="Título del artículo o producto..."
-                    className="mt-1 w-full rounded-md border border-gray-300 p-2 text-sm text-gray-800 focus:border-blue-500 focus:outline-none"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  disabled={registeringProduct || !newProductUrl}
-                  className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
-                >
-                  {registeringProduct ? 'Registrando…' : 'Registrar producto'}
-                </button>
-              </form>
+            {selectedFile && !uploadError && (
+              <p className="mt-1.5 text-xs text-muted">
+                {selectedFile.name} ·{' '}
+                {formatFileSize(selectedFile.size)}
+              </p>
             )}
-          </section>
-        </div>
-      )}
-    </main>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Subir versión revisada */}
+      <Modal
+        open={versionOpen}
+        onClose={() => {
+          if (uploadingVersion) {
+            return;
+          }
+          setVersionOpen(false);
+          setVersionError(null);
+        }}
+        title="Subir versión revisada"
+        description="Disponible cuando el comité solicitó correcciones. La versión anterior queda intacta en el historial."
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setVersionOpen(false);
+                setVersionError(null);
+              }}
+              disabled={uploadingVersion}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              form="upload-version-form"
+              loading={uploadingVersion}
+            >
+              {uploadingVersion ? 'Enviando versión…' : 'Enviar versión'}
+            </Button>
+          </>
+        }
+      >
+        <form
+          id="upload-version-form"
+          onSubmit={handleUploadVersion}
+          className="space-y-4"
+          noValidate
+        >
+          <div>
+            <label
+              htmlFor="version-file"
+              className="mb-1.5 block text-[13px] font-medium text-ink"
+            >
+              Protocolo revisado (PDF)
+              <span className="ml-1 text-danger" aria-hidden="true">*</span>
+            </label>
+            <input
+              id="version-file"
+              type="file"
+              accept=".pdf,application/pdf"
+              onChange={(event) => {
+                setNewVersionFile(event.target.files?.[0] ?? null);
+                setVersionError(null);
+              }}
+              aria-invalid={versionError ? true : undefined}
+              aria-describedby={
+                versionError ? 'version-file-error' : undefined
+              }
+              className="block w-full rounded-lg border border-line-strong bg-white text-[12px] text-muted file:mr-3 file:border-0 file:border-r file:border-line file:bg-surface-2 file:px-3 file:py-2.5 file:text-[12px] file:font-medium file:text-ink hover:file:bg-brand-50"
+            />
+            {newVersionFile && (
+              <p className="mt-1.5 text-xs text-muted">
+                {newVersionFile.name} · {formatFileSize(newVersionFile.size)}
+              </p>
+            )}
+            {versionError && (
+              <p
+                id="version-file-error"
+                role="alert"
+                className="mt-1.5 text-xs font-medium text-danger"
+              >
+                {versionError}
+              </p>
+            )}
+          </div>
+
+          <Textarea
+            id="version-comment"
+            label="Comentario para el comité"
+            rows={3}
+            maxLength={2000}
+            value={newVersionComment}
+            hint="Resume los cambios atendidos respecto al dictamen anterior."
+            onChange={(event) => setNewVersionComment(event.target.value)}
+            placeholder="Se ajustó la metodología y se amplió la muestra…"
+          />
+        </form>
+      </Modal>
+
+      {/* Registrar producto */}
+      <Modal
+        open={productOpen}
+        onClose={() => {
+          if (registeringProduct) {
+            return;
+          }
+          setProductOpen(false);
+          setProductError(null);
+        }}
+        title="Registrar producto de investigación"
+        description="Disponible para proyectos en ejecución o completados."
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setProductOpen(false);
+                setProductError(null);
+              }}
+              disabled={registeringProduct}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              form="register-product-form"
+              loading={registeringProduct}
+            >
+              {registeringProduct ? 'Registrando…' : 'Registrar producto'}
+            </Button>
+          </>
+        }
+      >
+        <form
+          id="register-product-form"
+          onSubmit={handleRegisterProduct}
+          className="space-y-4"
+          noValidate
+        >
+          <Select
+            id="product-type"
+            label="Tipo de producto"
+            value={newProductType}
+            onChange={(event) =>
+              setNewProductType(event.target.value as ProductType)
+            }
+          >
+            {Object.entries(PRODUCT_TYPE_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </Select>
+
+          <Input
+            id="product-url"
+            label="URL o DOI"
+            required
+            value={newProductUrl}
+            error={productError ?? undefined}
+            onChange={(event) => {
+              setNewProductUrl(event.target.value);
+              setProductError(null);
+            }}
+            placeholder="https://… o 10.xxxx/…"
+            hint="Si pegas un DOI, se enlaza automáticamente a doi.org."
+          />
+
+          <Input
+            id="product-title"
+            label="Título"
+            value={newProductTitle}
+            onChange={(event) => setNewProductTitle(event.target.value)}
+            placeholder="Título del artículo o producto"
+          />
+        </form>
+      </Modal>
+
+      <ConfirmDialog
+        open={pendingReview !== null}
+        onClose={() => {
+          if (reviewingId === null) {
+            setPendingReview(null);
+          }
+        }}
+        onConfirm={() => {
+          if (pendingReview) {
+            void handleReview(pendingReview.documentId, pendingReview.decision);
+          }
+        }}
+        title={
+          pendingReview?.decision === 'Rejected'
+            ? 'Rechazar documento'
+            : 'Aprobar documento'
+        }
+        description={
+          pendingReview?.decision === 'Rejected' ? (
+            <>
+              «{pendingReview?.fileName}» quedará marcado como rechazado y el
+              equipo deberá corregirlo y volver a subirlo. La revisión anterior
+              se conserva en el historial.
+            </>
+          ) : (
+            <>
+              «{pendingReview?.fileName}» quedará aprobado por la administración.
+              El equipo podrá ver el cambio de inmediato.
+            </>
+          )
+        }
+        confirmLabel={
+          pendingReview?.decision === 'Rejected'
+            ? 'Rechazar documento'
+            : 'Aprobar documento'
+        }
+        cancelLabel="Revisar de nuevo"
+        tone={pendingReview?.decision === 'Rejected' ? 'danger' : 'primary'}
+        loading={reviewingId !== null}
+      />
+
+      <ConfirmDialog
+        open={certifyOpen}
+        onClose={() => {
+          if (!certifying) {
+            setCertifyOpen(false);
+          }
+        }}
+        onConfirm={() => void handleCertifyAnonymization()}
+        title="Certificar anonimización de datasets"
+        description={
+          <>
+            Declaras bajo responsabilidad institucional que los datasets con
+            datos de personas están anonimizados. La certificación queda
+            registrada en la bitácora de auditoría.
+          </>
+        }
+        confirmLabel="Certificar"
+        cancelLabel="Cancelar"
+        tone="primary"
+        loading={certifying}
+      />
+    </div>
   );
 }
 
-function DocumentTableRow({
+function DocumentRow({
   document,
-  isPrincipalInvestigator,
   isReviewer,
   updating,
   reviewing,
@@ -752,7 +1231,6 @@ function DocumentTableRow({
   onDownload,
 }: {
   document: ProjectDocument;
-  isPrincipalInvestigator: boolean;
   isReviewer: boolean;
   updating: boolean;
   reviewing: boolean;
@@ -762,131 +1240,162 @@ function DocumentTableRow({
     documentId: number,
     visibility: DocumentVisibility,
   ) => void;
-  onReview: (documentId: number, decision: 'Approved' | 'Rejected') => void;
+  onReview: (
+    documentId: number,
+    decision: 'Approved' | 'Rejected',
+  ) => void;
   onDownload: (documentId: number) => void;
 }) {
-  const reviewBadgeClass =
-    document.reviewStatus === 'Approved'
-      ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-      : document.reviewStatus === 'Rejected'
-        ? 'border-red-200 bg-red-50 text-red-700'
-        : 'border-amber-200 bg-amber-50 text-amber-800';
+  const fileName = document.fileName ?? `Documento #${document.documentId}`;
   const lockedTooltip = document.mandatoryReview
     ? 'Documento de revisión obligatoria: siempre visible para la administración.'
-    : isPrincipalInvestigator
-      ? 'El proyecto ya fue cerrado, completado o rechazado; su visibilidad no puede modificarse.'
-      : 'Solo el Investigador Principal puede cambiar la visibilidad.';
+    : document.canChangeVisibility
+      ? undefined
+      : 'El proyecto ya fue cerrado, completado o rechazado; su visibilidad no puede modificarse.';
 
   return (
     <tr
       id={`document-${document.documentId}`}
-      className={`scroll-mt-24 border-b border-gray-100 align-middle hover:bg-gray-50/70 ${
-        highlighted ? 'bg-blue-50/70' : ''
+      className={`scroll-mt-24 border-b border-line/70 align-middle transition-colors duration-150 hover:bg-surface-2 ${
+        highlighted ? 'bg-brand-50' : ''
       }`}
     >
-      <td className="px-6 py-3">
-        <span className="block truncate text-sm font-medium text-gray-900">
-          {document.fileName ?? `Documento #${document.documentId}`}
-        </span>
-        <span className="block text-xs text-gray-500">
-          v{document.version}
-          {highlighted && (
-            <span className="ml-2 inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
-              Citado por el asistente
+      <Td className="px-5">
+        <span className="flex items-center gap-2.5">
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-brand-50 text-brand-700">
+            <Icon name="doc" className="h-4 w-4" />
+          </span>
+          <span className="min-w-0">
+            <span className="block max-w-[300px] truncate text-[12.5px] font-medium text-ink">
+              {fileName}
             </span>
-          )}
-          {document.mandatoryReview && (
-            <span className="ml-2 inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
-              Revisión obligatoria
+            <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10.5px] text-muted">
+              v{document.version} · {formatFileSize(document.fileSize)}
+              {document.mandatoryReview && (
+                <Badge tone="warning">Revisión obligatoria</Badge>
+              )}
+              {highlighted && <Badge tone="info">Citado por el asistente</Badge>}
             </span>
-          )}
+          </span>
         </span>
-      </td>
-      <td className="px-3 py-3 text-sm text-gray-600">
+      </Td>
+
+      <Td className="text-[12px] text-muted">
         {documentTypeLabel(document.docType)}
-      </td>
-      <td className="px-3 py-3 text-sm text-gray-600">
-        {new Date(document.uploadedAt).toLocaleDateString('es-MX', {
-          year: 'numeric',
-          month: 'short',
-          day: '2-digit',
-        })}
-      </td>
-      <td className="px-3 py-3 text-sm text-gray-600">
-        {formatFileSize(document.fileSize)}
-      </td>
-      <td className="px-3 py-3">
+      </Td>
+
+      <Td className="whitespace-nowrap text-[12px] text-muted">
+        {formatDate(document.uploadedAt)}
+      </Td>
+
+      <Td>
         {document.canChangeVisibility && !updating ? (
-          <select
-            aria-label={`Visibilidad de ${document.fileName ?? document.documentId}`}
-            value={document.visibility}
-            onChange={(event) =>
-              onChangeVisibility(
-                document.documentId,
-                event.target.value as DocumentVisibility,
-              )
-            }
-            className="rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-800 focus:border-blue-500 focus:outline-none"
-          >
-            {VISIBILITY_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+          <>
+            <label className="sr-only" htmlFor={`visibility-${document.documentId}`}>
+              Visibilidad de {fileName}
+            </label>
+            <select
+              id={`visibility-${document.documentId}`}
+              value={document.visibility}
+              onChange={(event) =>
+                onChangeVisibility(
+                  document.documentId,
+                  event.target.value as DocumentVisibility,
+                )
+              }
+              className="h-8 max-w-[190px] rounded-lg border border-line-strong bg-white px-2 text-[11.5px] font-medium text-ink transition-colors duration-150 hover:border-brand-300 focus:border-brand-500"
+            >
+              {VISIBILITY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </>
         ) : (
           <span
             title={lockedTooltip}
-            className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-medium text-gray-600"
+            className="inline-flex items-center gap-1.5 text-[11.5px] text-muted"
           >
+            {updating && <Spinner className="h-3 w-3" />}
             {updating ? 'Guardando…' : visibilityLabel(document.visibility)}
+            {!updating && !document.canChangeVisibility && (
+              <Icon name="shield" className="h-3 w-3" />
+            )}
           </span>
         )}
-      </td>
-      <td className="px-3 py-3">
-        <span
-          className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${reviewBadgeClass}`}
-          title={document.reviewNotes ?? undefined}
-        >
-          {REVIEW_STATUS_LABELS[document.reviewStatus] ??
-            document.reviewStatus}
-        </span>
-        {document.reviewerName && (
-          <span className="mt-1 block text-[11px] text-gray-500">
-            por {document.reviewerName}
-          </span>
-        )}
-        {isReviewer && document.canReview && (
-          <div className="mt-2 flex gap-2">
-            <button
-              type="button"
-              onClick={() => onReview(document.documentId, 'Approved')}
-              disabled={reviewing}
-              className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
-            >
-              {reviewing ? '…' : 'Aprobar'}
-            </button>
-            <button
-              type="button"
-              onClick={() => onReview(document.documentId, 'Rejected')}
-              disabled={reviewing}
-              className="rounded-md border border-red-300 bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50"
-            >
-              Rechazar
-            </button>
-          </div>
-        )}
-      </td>
-      <td className="px-3 py-3 text-right">
-        <button
-          type="button"
+      </Td>
+
+      <Td>
+        <div className="flex flex-col items-start gap-1.5">
+          <Badge
+            tone={REVIEW_TONES[document.reviewStatus] ?? 'neutral'}
+            className="capitalize"
+          >
+            {REVIEW_STATUS_LABELS[document.reviewStatus] ??
+              document.reviewStatus}
+          </Badge>
+
+          {document.reviewerName && (
+            <span className="text-[10.5px] text-muted">
+              por {document.reviewerName}
+            </span>
+          )}
+
+          {isReviewer && document.canReview && (
+            <div className="flex gap-1.5">
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => onReview(document.documentId, 'Approved')}
+                disabled={reviewing}
+                className="h-7 px-2 text-[11px]"
+              >
+                Aprobar
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => onReview(document.documentId, 'Rejected')}
+                disabled={reviewing}
+                className="h-7 px-2 text-[11px] text-danger hover:bg-danger-soft hover:text-danger"
+              >
+                Rechazar
+              </Button>
+            </div>
+          )}
+        </div>
+      </Td>
+
+      <Td className="px-5 text-right">
+        <Button
+          size="sm"
+          variant="secondary"
           onClick={() => onDownload(document.documentId)}
-          disabled={downloading}
-          className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none disabled:opacity-50"
+          loading={downloading}
+          leadingIcon={
+            downloading ? undefined : (
+              <Icon name="download" className="h-3.5 w-3.5" />
+            )
+          }
+          aria-label={`Descargar ${fileName}`}
         >
           {downloading ? 'Descargando…' : 'Descargar'}
-        </button>
-      </td>
+        </Button>
+      </Td>
     </tr>
+  );
+}
+
+function DocumentsSkeleton() {
+  return (
+    <div aria-busy="true">
+      <span className="sr-only">Cargando documentos del proyecto…</span>
+      <table className="w-full min-w-[820px] border-collapse">
+        <tbody>
+          <SkeletonRows rows={4} columns={6} />
+        </tbody>
+      </table>
+    </div>
   );
 }

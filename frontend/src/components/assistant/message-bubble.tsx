@@ -51,7 +51,7 @@ export function MessageBubble({
         <div
           className={`rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed shadow-sm ${
             isUser
-              ? 'rounded-br-md bg-gradient-to-br from-brand-800 to-brand-600 text-white'
+              ? 'rounded-br-md bg-brand-800 text-white'
               : isRefusal
                 ? 'rounded-bl-md border border-amber-200 bg-amber-50/70 text-ink'
                 : 'rounded-bl-md border border-line bg-white text-ink'

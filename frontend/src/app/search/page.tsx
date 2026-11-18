@@ -1,8 +1,18 @@
 'use client';
 
 import Link from 'next/link';
-import { Suspense, useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useState, type FormEvent } from 'react';
+import { AuthedShell } from '@/components/dashboard/authed-shell';
+import { Icon } from '@/components/dashboard/icons';
+import { Breadcrumbs } from '@/components/ui/breadcrumbs';
+import { Button, ButtonLink } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import { Input } from '@/components/ui/field';
+import { PageHeader } from '@/components/ui/page-header';
+import { Spinner } from '@/components/ui/spinner';
+import { TableShell, Td, Th } from '@/components/ui/table';
 import { useToast } from '@/components/ui/toast-provider';
 import {
   SEARCH_TYPE_LABELS,
@@ -12,51 +22,73 @@ import {
   type SearchResultType,
 } from '@/lib/search';
 
-const TYPE_OPTIONS: SearchResultType[] = ['PROJECT', 'CALL', 'USER'];
+const TYPE_OPTIONS: Array<{ value: SearchResultType; label: string }> = [
+  { value: 'PROJECT', label: SEARCH_TYPE_LABELS.PROJECT },
+  { value: 'CALL', label: SEARCH_TYPE_LABELS.CALL },
+  { value: 'USER', label: SEARCH_TYPE_LABELS.USER },
+];
+
+const TYPE_BADGES: Record<SearchResultType, string> = {
+  PROJECT: 'border-brand-200 bg-brand-50 text-brand-800',
+  CALL: 'border-success-line bg-success-soft text-success',
+  USER: 'border-info-line bg-info-soft text-info',
+};
 
 export default function SearchPage() {
   return (
-    <Suspense fallback={<SearchFallback />}>
-      <SearchContent />
-    </Suspense>
-  );
-}
-
-function SearchFallback() {
-  return (
-    <main className="min-h-screen bg-surface px-4 py-10">
-      <p className="mx-auto max-w-4xl text-sm text-muted">Cargando busqueda…</p>
-    </main>
+    <AuthedShell
+      activeId="rag"
+      searchPlaceholder="Buscar en tu conversación o en la documentación…"
+    >
+      {() => (
+        <Suspense
+          fallback={
+            <div className="flex items-center gap-2 text-[13px] text-muted">
+              <Spinner className="h-4 w-4" />
+              Preparando la búsqueda…
+            </div>
+          }
+        >
+          <SearchContent />
+        </Suspense>
+      )}
+    </AuthedShell>
   );
 }
 
 function SearchContent() {
-  const params = useSearchParams();
   const toast = useToast();
-  const query = (params.get('q') ?? '').trim();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  // El buscador del shell navega a /search?q=…: la pantalla debe arrancar
+  // con ese término ya aplicado, no pedir que se escriba otra vez.
+  const initialQuery = searchParams.get('q')?.trim() ?? '';
+  const [input, setInput] = useState(initialQuery);
+  const [appliedQuery, setAppliedQuery] = useState(initialQuery);
   const [selectedTypes, setSelectedTypes] = useState<SearchResultType[]>([]);
   const [page, setPage] = useState(1);
   const [result, setResult] = useState<SearchPage | null>(null);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
-  useEffect(() => {
-    setPage(1);
-  }, [query]);
+  const query = appliedQuery.trim();
+  const requestKey = `${query}|${selectedTypes.join(',')}|${page}|${reloadKey}`;
+  const loading = query !== '' && loadedKey !== requestKey;
 
   useEffect(() => {
     if (!query) {
-      setResult(null);
       return;
     }
     let active = true;
-    setLoading(true);
-    setError(null);
     searchAll(query, selectedTypes, page)
       .then((data) => {
-        if (active) {
-          setResult(data);
+        if (!active) {
+          return;
         }
+        setResult(data);
+        setError(null);
+        setLoadedKey(requestKey);
       })
       .catch((loadError: unknown) => {
         if (!active) {
@@ -64,17 +96,25 @@ function SearchContent() {
         }
         const message = searchErrorMessage(loadError);
         setError(message);
+        setResult(null);
+        setLoadedKey(requestKey);
         toast.error(message);
-      })
-      .finally(() => {
-        if (active) {
-          setLoading(false);
-        }
       });
     return () => {
       active = false;
     };
-  }, [query, selectedTypes, page, toast]);
+  }, [query, selectedTypes, page, reloadKey, requestKey, toast]);
+
+  function applyQuery(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nextQuery = input.trim();
+    setPage(1);
+    setAppliedQuery(nextQuery);
+    router.replace(
+      nextQuery ? `/search?q=${encodeURIComponent(nextQuery)}` : '/search',
+      { scroll: false },
+    );
+  }
 
   function toggleType(type: SearchResultType) {
     setPage(1);
@@ -85,131 +125,213 @@ function SearchContent() {
     );
   }
 
+  const canSubmit = input.trim().length > 0;
+
   return (
-    <main className="min-h-screen bg-surface px-4 py-10">
-      <div className="mx-auto w-full max-w-4xl">
-        <Link
-          href="/dashboard"
-          className="text-xs font-semibold uppercase tracking-wide text-brand-700 hover:underline"
-        >
-          ← Volver al panel
-        </Link>
-        <h1 className="mt-2 text-2xl font-semibold text-ink">
-          Busqueda institucional
-        </h1>
-        <p className="mt-1 text-sm text-muted">
-          Resultados de proyectos, convocatorias y usuarios con los permisos de
-          tu rol (RF-012).
-        </p>
+    <div className="space-y-5">
+      <Breadcrumbs
+        items={[
+          { label: 'Panel', href: '/dashboard' },
+          { label: 'Búsqueda institucional' },
+        ]}
+      />
 
-        <div className="mt-5 rounded-xl border border-line bg-white p-4 shadow-sm">
-          <p className="text-sm text-ink">
-            {query ? (
-              <>
-                Resultados para <strong>&ldquo;{query}&rdquo;</strong>
-              </>
-            ) : (
-              'Escribe una busqueda desde la barra superior.'
-            )}
-          </p>
-          <div className="mt-3 flex flex-wrap gap-2" aria-label="Filtrar por tipo">
-            {TYPE_OPTIONS.map((type) => {
-              const active = selectedTypes.includes(type);
-              return (
-                <button
-                  key={type}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => toggleType(type)}
-                  className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
-                    active
-                      ? 'border-brand-600 bg-brand-600 text-white'
-                      : 'border-line bg-white text-ink hover:bg-brand-50'
-                  }`}
-                >
-                  {SEARCH_TYPE_LABELS[type]}
-                </button>
-              );
-            })}
-          </div>
+      <PageHeader
+        title="Búsqueda institucional"
+        description="Resultados de proyectos, convocatorias y usuarios con los permisos de tu rol (RF-012)."
+      />
+
+      <form onSubmit={applyQuery} className="flex flex-wrap items-end gap-3">
+        <div className="min-w-0 flex-1 basis-72">
+          <label htmlFor="search-input" className="sr-only">
+            Término de búsqueda
+          </label>
+          <Input
+            id="search-input"
+            label="Término"
+            type="search"
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            placeholder="Etiqueta, objetivo o convocatoria…"
+          />
         </div>
+        <Button type="submit" disabled={!canSubmit}>
+          Buscar
+        </Button>
+      </form>
 
-        {!query && (
-          <p className="mt-8 rounded-xl border border-dashed border-line bg-white p-8 text-center text-sm text-muted">
-            La busqueda usa texto completo en espanol y respeta la
-            confidencialidad de los proyectos (BR-007).
-          </p>
-        )}
-
-        {query && loading && (
-          <p className="mt-8 text-sm text-muted">Buscando…</p>
-        )}
-
-        {query && !loading && error && (
-          <div className="mt-8 rounded-xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
-            {error}
-          </div>
-        )}
-
-        {query && !loading && !error && result && (
-          <section className="mt-6 overflow-hidden rounded-xl border border-line bg-white shadow-sm">
-            <header className="flex items-center justify-between border-b border-line px-5 py-3">
-              <h2 className="text-sm font-semibold text-ink">
-                {result.total} coincidencia(s)
-              </h2>
-              <span className="text-xs text-muted">
-                Pagina {result.page} de {Math.max(1, result.pageInfo.totalPages)}
-              </span>
-            </header>
-            {result.items.length === 0 ? (
-              <p className="px-5 py-10 text-center text-sm text-muted">
-                No se encontraron resultados con los filtros actuales.
-              </p>
-            ) : (
-              <ul className="divide-y divide-line">
-                {result.items.map((item) => (
-                  <li key={`${item.type}-${item.id}`}>
-                    <Link
-                      href={item.link ?? '/dashboard'}
-                      className="block px-5 py-4 transition hover:bg-brand-50/60"
-                    >
-                      <span className="inline-flex rounded-full border border-brand-200 bg-brand-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-800">
-                        {SEARCH_TYPE_LABELS[item.type]}
-                      </span>
-                      <span className="mt-1 block text-sm font-semibold text-ink">
-                        {item.title}
-                      </span>
-                      {item.subtitle && (
-                        <span className="mt-0.5 line-clamp-2 block text-xs text-muted">
-                          {item.subtitle}
-                        </span>
-                      )}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <footer className="flex items-center justify-between border-t border-line px-5 py-3">
-              <button
-                type="button"
-                disabled={!result.pageInfo.hasPreviousPage}
-                onClick={() => setPage((current) => Math.max(1, current - 1))}
-                className="rounded-md border border-line px-3 py-1.5 text-xs font-medium text-ink disabled:opacity-40"
-              >
-                Anterior
-              </button>
-              <button
-                type="button"
-                disabled={!result.pageInfo.hasNextPage}
-                onClick={() => setPage((current) => current + 1)}
-                className="rounded-md border border-line px-3 py-1.5 text-xs font-medium text-ink disabled:opacity-40"
-              >
-                Siguiente
-              </button>
-            </footer>
-          </section>
+      <div className="flex flex-wrap items-center gap-2">
+        {TYPE_OPTIONS.map((option) => {
+          const active = selectedTypes.includes(option.value);
+          return (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={active}
+              onClick={() => toggleType(option.value)}
+              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors duration-150 ${
+                active
+                  ? 'border-brand-700 bg-brand-700 text-white'
+                  : 'border-line bg-white text-ink hover:border-brand-300 hover:bg-brand-50 hover:text-brand-800'
+              }`}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+        {selectedTypes.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setSelectedTypes([])}
+            className="rounded-full border border-line bg-white px-3 py-1.5 text-xs font-medium text-muted transition-colors duration-150 hover:border-danger-line hover:bg-danger-soft hover:text-danger"
+          >
+            Limpiar tipos
+          </button>
         )}
       </div>
-    </main>
+
+      {query === '' && (
+        <EmptyState
+          className="bg-white px-6 py-12"
+          icon={<Icon name="search" className="h-5 w-5" />}
+          title="Empieza una búsqueda"
+          description="Escribe un término y la búsqueda revisará el texto completo con las fuentes autorizadas a tu rol."
+          action={
+            <ButtonLink
+              href="/assistant"
+              variant="secondary"
+              size="sm"
+              leadingIcon={<Icon name="ai" className="h-4 w-4" />}
+            >
+              Preguntar al asistente
+            </ButtonLink>
+          }
+        />
+      )}
+
+      {query !== '' && loading && (
+        <div className="overflow-hidden rounded-xl border border-line bg-white" aria-busy="true">
+          <span className="sr-only">Buscando resultados…</span>
+          <div className="p-5">
+            <div className="flex items-center gap-2 text-[13px] text-muted">
+              <Spinner className="h-4 w-4" />
+              Analizando fuentes autorizadas…
+            </div>
+            <div className="mt-4 space-y-3">
+              {[0, 1, 2].map((index) => (
+                <div
+                  key={index}
+                  className="rounded-lg border border-line bg-surface-2 p-3.5"
+                >
+                  <div className="h-3 w-2/3 rounded bg-line/60" />
+                  <div className="mt-2 h-2.5 w-1/3 rounded bg-line/60" />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {query !== '' && !loading && error && (
+        <ErrorState
+          className="min-h-[260px] justify-center bg-white"
+          title="No se pudo completar la búsqueda"
+          description={error}
+          onRetry={() => {
+            setError(null);
+            setLoadedKey(null);
+            setReloadKey((key) => key + 1);
+          }}
+        />
+      )}
+
+      {query !== '' && !loading && !error && result && (
+        <section className="overflow-hidden rounded-xl border border-line bg-white">
+          <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
+            <div>
+              <h2 className="text-sm font-semibold text-ink">
+                {result.total} {result.total === 1 ? 'coincidencia' : 'coincidencias'}
+              </h2>
+              <p className="mt-0.5 text-xs text-muted">
+                Página {result.page} de{' '}
+                {Math.max(1, result.pageInfo.totalPages)}
+              </p>
+            </div>
+          </header>
+
+          {result.items.length === 0 ? (
+            <div className="p-5">
+              <EmptyState
+                compact
+                title="Sin resultados para estos criterios"
+                description="Prueba con otro término o elimina los tipos de contenido seleccionados."
+              />
+            </div>
+          ) : (
+            <TableShell className="rounded-none border-0">
+              <table className="w-full min-w-[680px] border-collapse">
+                <caption className="sr-only">
+                  Resultados de la búsqueda institucional con tipo, título y
+                  subtítulo
+                </caption>
+                <thead>
+                  <tr className="border-b border-line bg-surface-2">
+                    <Th className="px-5">Tipo</Th>
+                    <Th>Título</Th>
+                    <Th className="px-5">Detalles</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.items.map((item) => (
+                    <tr
+                      key={`${item.type}-${item.id}`}
+                      className="border-b border-line/70 transition-colors duration-150 hover:bg-surface-2"
+                    >
+                      <Td className="px-5">
+                        <span
+                          className={`inline-flex rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${TYPE_BADGES[item.type] ?? 'border-line bg-surface-2 text-muted'}`}
+                        >
+                          {SEARCH_TYPE_LABELS[item.type]}
+                        </span>
+                      </Td>
+                      <Td>
+                        <Link
+                          href={item.link ?? '/dashboard'}
+                          className="block text-[12.5px] font-medium text-ink transition-colors duration-150 hover:text-brand-700 hover:underline"
+                        >
+                          {item.title}
+                        </Link>
+                      </Td>
+                      <Td className="px-5 text-right text-[11.5px] text-muted">
+                        {item.subtitle ?? '—'}
+                      </Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </TableShell>
+          )}
+
+          <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-5 py-3">
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={page <= 1 || !result.pageInfo.hasPreviousPage}
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+            >
+              Anterior
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={page >= Math.max(1, result.pageInfo.totalPages) || !result.pageInfo.hasNextPage}
+              onClick={() => setPage((current) => current + 1)}
+            >
+              Siguiente
+            </Button>
+          </footer>
+        </section>
+      )}
+    </div>
   );
 }

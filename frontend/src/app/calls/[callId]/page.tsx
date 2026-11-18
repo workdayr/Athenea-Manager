@@ -1,10 +1,18 @@
 'use client';
 
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { useToast } from '@/components/ui/toast-provider';
-import { authClient } from '@/lib/auth-client';
+import { AuthedShell } from '@/components/dashboard/authed-shell';
+import { Icon } from '@/components/dashboard/icons';
+import { Alert } from '@/components/ui/alert';
+import { BackLink, Breadcrumbs } from '@/components/ui/breadcrumbs';
+import { ButtonLink } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import { PageHeader } from '@/components/ui/page-header';
+import { ProgressBar } from '@/components/ui/progress';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   CALL_STATUS_LABELS,
   effectiveStatus,
@@ -13,197 +21,264 @@ import {
   isAcceptingApplications,
   type Call,
 } from '@/lib/calls';
-import { toPlatformRole, type PlatformRole } from '@/lib/dashboard';
+import type { DashboardUser } from '@/lib/dashboard';
 
 /**
- * F1-09 / RF-018: detalle de la convocatoria y punto de postulacion.
- * La postulacion reutiliza el registro de propuestas (5 PDFs, cuota y
+ * F1-09 / RF-018: detalle de la convocatoria y punto de postulación.
+ * La postulación reutiliza el registro de propuestas (5 PDFs, cuota y
  * BR-002) pasando `callId`; los errores CALL_FULL / CALL_CLOSED se
- * muestran ahi al confirmar.
+ * muestran ahí al confirmar.
  */
 export default function CallDetailPage() {
-  const router = useRouter();
+  return (
+    <AuthedShell
+      activeId="convocatorias"
+      searchPlaceholder="Buscar convocatorias por nombre o vigencia…"
+    >
+      {(user) => <CallDetailContent user={user} />}
+    </AuthedShell>
+  );
+}
+
+function CallDetailContent({ user }: { user: DashboardUser }) {
   const params = useParams<{ callId: string }>();
   const callId = Number(params?.callId);
-  const toast = useToast();
+  const validCallId = Number.isInteger(callId) && callId > 0;
 
-  const [checking, setChecking] = useState(true);
-  const [role, setRole] = useState<PlatformRole>('STUDENT');
   const [call, setCall] = useState<Call | null | undefined>(undefined);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
-    let active = true;
-    if (!Number.isInteger(callId) || callId < 1) {
-      router.replace('/calls');
+    if (!validCallId) {
       return;
     }
-    authClient.getSession().then(({ data }) => {
-      if (!active) {
-        return;
-      }
-      if (!data?.user) {
-        router.replace('/login');
-        return;
-      }
-      setRole(toPlatformRole((data.user as { role?: unknown }).role));
-      setChecking(false);
-      fetchCall(callId)
-        .then((result) => {
-          if (active) {
-            setCall(result);
-          }
-        })
-        .catch(() => {
-          if (active) {
-            setCall(null);
-            toast.error(
-              'No fue posible cargar la convocatoria. Intenta de nuevo.',
-              'No se pudo cargar',
-            );
-          }
-        });
-    });
+    let active = true;
+    fetchCall(callId)
+      .then((result) => {
+        if (active) {
+          setCall(result);
+        }
+      })
+      .catch((loadError: unknown) => {
+        if (active) {
+          setCall(undefined);
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : 'No pudimos cargar la convocatoria.',
+          );
+        }
+      });
     return () => {
       active = false;
     };
-  }, [callId, router, toast]);
+  }, [callId, validCallId, reloadKey]);
 
-  if (checking) {
+  if (!validCallId) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-50">
-        <p className="text-sm text-gray-600">Verificando sesión…</p>
-      </main>
+      <div className="space-y-6">
+        <BackLink href="/calls">Volver a convocatorias</BackLink>
+        <ErrorState
+          className="min-h-[280px] justify-center bg-white"
+          title="La convocatoria indicada no es válida"
+          description="El enlace no contiene un identificador de convocatoria reconocible."
+          action={
+            <ButtonLink href="/calls" variant="secondary" size="sm">
+              Ver convocatorias
+            </ButtonLink>
+          }
+        />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <BackLink href="/calls">Volver a convocatorias</BackLink>
+        <ErrorState
+          className="min-h-[280px] justify-center bg-white"
+          title="No pudimos cargar la convocatoria"
+          description={error}
+          onRetry={() => {
+            setError(null);
+            setReloadKey((key) => key + 1);
+          }}
+        />
+      </div>
     );
   }
 
   if (call === undefined) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-50">
-        <p className="text-sm text-gray-600">Cargando convocatoria…</p>
-      </main>
-    );
+    return <CallDetailSkeleton />;
   }
 
   if (call === null) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
-        <section className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-8 text-center shadow-sm">
-          <h1 className="text-xl font-semibold text-gray-900">
-            Convocatoria no encontrada
-          </h1>
-          <p className="mt-2 text-sm text-gray-600">
-            La convocatoria no existe o ya no está disponible.
-          </p>
-          <Link
-            href="/calls"
-            className="mt-4 inline-block text-sm font-medium text-blue-700 hover:underline"
-          >
-            Ver convocatorias
-          </Link>
-        </section>
-      </main>
+      <div className="space-y-6">
+        <BackLink href="/calls">Volver a convocatorias</BackLink>
+        <EmptyState
+          className="bg-white px-6 py-12"
+          icon={<Icon name="calls" className="h-5 w-5" />}
+          title="Convocatoria no encontrada"
+          description="La convocatoria no existe o ya no está disponible para consulta."
+          action={
+            <ButtonLink href="/calls" variant="secondary">
+              Ver convocatorias
+            </ButtonLink>
+          }
+        />
+      </div>
     );
   }
 
   const status = effectiveStatus(call);
   const accepting = isAcceptingApplications(call);
-  const canApply = role === 'PRINCIPAL_INVESTIGATOR';
+  const canApply = user.role === 'PRINCIPAL_INVESTIGATOR';
 
   return (
-    <main className="min-h-screen bg-gray-50 px-4 py-8">
-      <div className="mx-auto w-full max-w-3xl">
-        <p className="text-xs font-medium text-blue-700">
-          CONVOCATORIA #{call.callId} · RF-018
-        </p>
-        <div className="mt-1 flex flex-wrap items-start justify-between gap-3">
-          <h1 className="text-2xl font-semibold text-gray-900">{call.title}</h1>
+    <div className="space-y-5">
+      <Breadcrumbs
+        items={[
+          { label: 'Panel', href: '/dashboard' },
+          { label: 'Convocatorias', href: '/calls' },
+          { label: `#${call.callId}` },
+        ]}
+      />
+
+      <PageHeader
+        title={call.title}
+        description={`Convocatoria #${call.callId} · Publicada el ${formatCallDate(call.datePublished)}`}
+        actions={
           <span
-            className={
+            className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
               status === 'OPEN'
-                ? 'rounded-full border border-green-300 bg-green-50 px-3 py-1 text-xs font-medium text-green-800'
-                : 'rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700'
-            }
+                ? 'border-success-line bg-success-soft text-success'
+                : 'border-line bg-surface-2 text-muted'
+            }`}
           >
             {CALL_STATUS_LABELS[status]}
           </span>
-        </div>
+        }
+      />
 
-        <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-          <p className="whitespace-pre-line text-sm text-gray-700">
+      <div className="grid gap-5 lg:grid-cols-[1.6fr_1fr]">
+        <section className="rounded-xl border border-line bg-white p-5 lg:p-6">
+          <h2 className="text-sm font-semibold text-ink">Descripción</h2>
+          <p className="mt-2 whitespace-pre-line text-[13px] leading-relaxed text-ink/90">
             {call.description}
           </p>
+        </section>
 
-          <dl className="mt-6 grid gap-3 text-sm text-gray-700 sm:grid-cols-2">
-            <div>
-              <dt className="text-xs text-gray-500">Publicada</dt>
-              <dd className="font-medium">
-                {formatCallDate(call.datePublished)}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs text-gray-500">Fecha límite</dt>
-              <dd className="font-medium">{formatCallDate(call.deadline)}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-gray-500">Cupo total</dt>
-              <dd className="font-medium">{call.applicationCap}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-gray-500">Cupos restantes</dt>
-              <dd className="font-medium">{call.remainingSlots}</dd>
-            </div>
+        <section className="rounded-xl border border-line bg-white p-5">
+          <h2 className="text-sm font-semibold text-ink">
+            Datos de la convocatoria
+          </h2>
+          <dl className="mt-3 space-y-2.5 text-xs">
+            <Row label="Publicada" value={formatCallDate(call.datePublished)} />
+            <Row label="Fecha límite" value={formatCallDate(call.deadline)} />
+            <Row label="Cupo total" value={String(call.applicationCap)} />
+            <Row
+              label="Cupos restantes"
+              value={String(call.remainingSlots)}
+            />
           </dl>
+
+          <div className="mt-4 rounded-lg border border-line bg-surface-2 p-3">
+            <div className="flex items-center justify-between text-[11px] text-muted">
+              <span>Ocupación del cupo</span>
+              <strong className="font-semibold tabular-nums text-ink">
+                {call.applicationCount}/{call.applicationCap}
+              </strong>
+            </div>
+            <ProgressBar
+              className="mt-1.5"
+              label="Ocupación del cupo de la convocatoria"
+              size="sm"
+              tone={call.remainingSlots <= 2 ? 'warning' : 'brand'}
+              value={call.applicationCount}
+              max={call.applicationCap}
+            />
+          </div>
         </section>
-
-        <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-gray-900">Postulación</h2>
-
-          {accepting ? (
-            <>
-              <p className="mt-1 text-sm text-gray-600">
-                La postulación crea tu propuesta en borrador y te lleva al
-                registro de los 5 documentos obligatorios. Recuerda que un
-                Investigador Principal puede mantener hasta 3 proyectos
-                activos (BR-002).
-              </p>
-              {canApply ? (
-                <Link
-                  href={`/projects/new?callId=${call.callId}`}
-                  className="mt-4 inline-block rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-                >
-                  Postular propuesta a esta convocatoria
-                </Link>
-              ) : (
-                <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                  Solo un Investigador Principal puede postular propuestas
-                  (BR-001).
-                </p>
-              )}
-            </>
-          ) : (
-            <p className="mt-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
-              {call.remainingSlots <= 0
-                ? 'La convocatoria alcanzó su cupo máximo y ya no acepta postulaciones.'
-                : 'La convocatoria está cerrada o alcanzó su fecha límite.'}
-            </p>
-          )}
-        </section>
-
-        <p className="mt-8 flex gap-4 text-sm">
-          <Link
-            href="/calls"
-            className="font-medium text-blue-700 hover:underline"
-          >
-            ← Todas las convocatorias
-          </Link>
-          <Link
-            href="/dashboard"
-            className="font-medium text-blue-700 hover:underline"
-          >
-            Panel principal
-          </Link>
-        </p>
       </div>
-    </main>
+
+      <section className="rounded-xl border border-line bg-white p-5 lg:p-6">
+        <h2 className="text-sm font-semibold text-ink">Postulación</h2>
+
+        {accepting ? (
+          <>
+            <p className="mt-2 max-w-2xl text-[13px] leading-relaxed text-muted">
+              La postulación crea tu propuesta en borrador y te lleva al registro
+              de los 5 documentos obligatorios. Un Investigador Principal puede
+              mantener hasta 3 proyectos activos.
+            </p>
+            {canApply ? (
+              <ButtonLink
+                href={`/projects/new?callId=${call.callId}`}
+                className="mt-4"
+                leadingIcon={<Icon name="register" className="h-4 w-4" />}
+              >
+                Postular propuesta a esta convocatoria
+              </ButtonLink>
+            ) : (
+              <Alert tone="warning" className="mt-4">
+                Solo un Investigador Principal puede postular propuestas. Si tu
+                rol cambia, esta acción se habilitará automáticamente.
+              </Alert>
+            )}
+          </>
+        ) : (
+          <Alert tone="info" className="mt-3">
+            {call.remainingSlots <= 0
+              ? 'La convocatoria alcanzó su cupo máximo y ya no acepta postulaciones.'
+              : 'La convocatoria está cerrada o alcanzó su fecha límite.'}
+          </Alert>
+        )}
+      </section>
+
+      <p className="text-xs">
+        <Link
+          href="/calls"
+          className="rounded font-medium text-muted transition-colors duration-150 hover:text-brand-700"
+        >
+          ← Todas las convocatorias
+        </Link>
+      </p>
+    </div>
+  );
+}
+
+function CallDetailSkeleton() {
+  return (
+    <div className="space-y-5" aria-busy="true">
+      <span className="sr-only">Cargando convocatoria…</span>
+      <Skeleton className="h-3 w-40" />
+      <Skeleton className="h-7 w-3/4 max-w-lg" />
+      <div className="grid gap-5 lg:grid-cols-[1.6fr_1fr]">
+        <div className="rounded-xl border border-line bg-white p-6">
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="mt-4 h-3 w-full" />
+          <Skeleton className="mt-2 h-3 w-5/6" />
+          <Skeleton className="mt-2 h-3 w-2/3" />
+        </div>
+        <div className="rounded-xl border border-line bg-white p-5">
+          <Skeleton className="h-4 w-40" />
+          {[0, 1, 2, 3].map((index) => (
+            <Skeleton key={index} className="mt-3 h-3 w-full" />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <dt className="text-muted">{label}</dt>
+      <dd className="text-right font-medium text-ink">{value}</dd>
+    </div>
   );
 }

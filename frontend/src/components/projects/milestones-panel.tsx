@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { useToast } from '@/components/ui/toast-provider';
+import { ConfirmDialog } from '@/components/ui/modal';
 import {
   MILESTONE_STATUS_LABELS,
   assignMilestone,
@@ -54,6 +55,7 @@ export function MilestonesPanel({
     name: string;
     dueDate: string;
   } | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<Milestone | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -74,7 +76,10 @@ export function MilestonesPanel({
   }, [projectId]);
 
   useEffect(() => {
-    void load();
+    const timer = setTimeout(() => {
+      void load();
+    }, 0);
+    return () => clearTimeout(timer);
   }, [load]);
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
@@ -174,14 +179,12 @@ export function MilestonesPanel({
     }
   }
 
-  async function handleDelete(milestone: Milestone) {
-    if (
-      !window.confirm(
-        `¿Eliminar el hito "${milestone.name}"? Esta accion no se puede deshacer.`,
-      )
-    ) {
+  async function confirmDelete() {
+    if (!pendingDelete) {
       return;
     }
+    const milestone = pendingDelete;
+    setPendingDelete(null);
     setBusyId(milestone.milestoneId);
     try {
       await deleteMilestone(milestone.milestoneId);
@@ -194,6 +197,29 @@ export function MilestonesPanel({
     } finally {
       setBusyId(null);
     }
+  }
+
+  if (pendingDelete) {
+    return (
+      <div className="space-y-6">
+        <ConfirmDialog
+          open
+          onClose={() => setPendingDelete(null)}
+          onConfirm={() => void confirmDelete()}
+          title="Eliminar hito"
+          description={
+            <>
+              Vas a eliminar «{pendingDelete.name}». Esta acción no se puede
+              deshacer.
+            </>
+          }
+          confirmLabel="Eliminar hito"
+          cancelLabel="Cancelar"
+          tone="danger"
+          loading={busyId === pendingDelete.milestoneId}
+        />
+      </div>
+    );
   }
 
   if (loading) {
@@ -435,7 +461,7 @@ export function MilestonesPanel({
                           <button
                             type="button"
                             disabled={isBusy}
-                            onClick={() => void handleDelete(milestone)}
+                            onClick={() => setPendingDelete(milestone)}
                             className="rounded-md border border-red-200 px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
                           >
                             Eliminar

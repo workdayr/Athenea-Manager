@@ -424,6 +424,7 @@ function projectKey(projectId: string): string {
 export function mapDashboardProject(project: DashboardProject): PriorityProject {
   return {
     id: projectKey(project.projectId),
+    projectId: String(project.projectId),
     title: project.title,
     call: project.callTitle ?? 'Sin convocatoria',
     pi: project.piName ?? 'Sin investigador registrado',

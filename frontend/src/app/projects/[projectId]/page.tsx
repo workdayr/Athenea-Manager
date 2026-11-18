@@ -2,17 +2,24 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
+import { AuthedShell } from '@/components/dashboard/authed-shell';
+import { Icon } from '@/components/dashboard/icons';
 import { MilestonesPanel } from '@/components/projects/milestones-panel';
 import { TeamPanel } from '@/components/projects/team-panel';
-import { Icon } from '@/components/dashboard/icons';
-import { authClient } from '@/lib/auth-client';
+import { Alert } from '@/components/ui/alert';
+import { BackLink, Breadcrumbs } from '@/components/ui/breadcrumbs';
+import { ButtonLink } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import { PageHeader } from '@/components/ui/page-header';
+import { ProgressBar } from '@/components/ui/progress';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   STATUS_LABELS,
   formatCurrency,
   formatDate,
-  toPlatformRole,
-  type PlatformRole,
+  type DashboardUser,
 } from '@/lib/dashboard';
 import {
   fetchProjectDetail,
@@ -34,91 +41,69 @@ const TABS: Array<{ id: Tab; label: string }> = [
 ];
 
 export default function ProjectDetailPage() {
+  return (
+    <AuthedShell
+      activeId="hitos"
+      searchPlaceholder="Buscar por proyecto, investigador o convocatoria…"
+    >
+      {(user) => <ProjectDetailContent user={user} />}
+    </AuthedShell>
+  );
+}
+
+function ProjectDetailContent({ user }: { user: DashboardUser }) {
   const params = useParams<{ projectId: string }>();
-  const router = useRouter();
   const projectId = Number(params?.projectId);
   const validProjectId = Number.isInteger(projectId) && projectId > 0;
 
-  const [checking, setChecking] = useState(true);
-  const [userId, setUserId] = useState('');
-  const [role, setRole] = useState<PlatformRole>('STUDENT');
-  const [project, setProject] = useState<ProjectDetail | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [detail, setDetail] = useState<{
+    project: ProjectDetail;
+    canManage: boolean;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const [tab, setTab] = useState<Tab>('resumen');
-  const [canManage, setCanManage] = useState(false);
   const [history, setHistory] = useState<ProjectHistoryEntry[] | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyAttempt, setHistoryAttempt] = useState(0);
 
   useEffect(() => {
-    let active = true;
-    authClient
-      .getSession()
-      .then(({ data }) => {
-        if (!active) {
-          return;
-        }
-        if (!data?.user) {
-          router.replace('/login');
-          return;
-        }
-        setUserId(data.user.id);
-        setRole(toPlatformRole((data.user as { role?: unknown }).role));
-        setChecking(false);
-      })
-      .catch(() => {
-        if (active) {
-          router.replace('/login');
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [router]);
-
-  useEffect(() => {
-    if (checking || !validProjectId) {
+    if (!validProjectId) {
       return;
     }
     let active = true;
-    setLoading(true);
-    setError(null);
     Promise.all([fetchProjectDetail(projectId), fetchTeamMembers(projectId)])
-      .then(([detail, team]) => {
+      .then(([project, team]) => {
         if (!active) {
           return;
         }
-        setProject(detail);
-        setCanManage(
-          role === 'ADMINISTRATOR' ||
+        setDetail({
+          project,
+          canManage:
+            user.role === 'ADMINISTRATOR' ||
             team.some(
               (member) =>
-                member.userId === userId &&
+                member.userId === user.id &&
                 member.projectRole === 'Principal_Investigator',
             ),
-        );
+        });
+        setError(null);
       })
       .catch((loadError: unknown) => {
         if (active) {
           setError(projectErrorMessage(loadError));
         }
-      })
-      .finally(() => {
-        if (active) {
-          setLoading(false);
-        }
       });
     return () => {
       active = false;
     };
-  }, [checking, projectId, role, userId, validProjectId]);
+  }, [projectId, user.id, user.role, validProjectId, reloadKey]);
 
   useEffect(() => {
     if (tab !== 'historial' || !validProjectId || history !== null) {
       return;
     }
     let active = true;
-    setHistoryError(null);
     fetchProjectHistory(projectId)
       .then((rows) => {
         if (active) {
@@ -133,36 +118,53 @@ export default function ProjectDetailPage() {
     return () => {
       active = false;
     };
-  }, [tab, projectId, history, validProjectId]);
+  }, [tab, projectId, history, validProjectId, historyAttempt]);
 
-  if (checking || loading) {
+  if (!validProjectId) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-surface">
-        <p className="text-sm text-muted">Cargando proyecto…</p>
-      </main>
+      <div className="space-y-6">
+        <BackLink href="/projects">Volver a proyectos</BackLink>
+        <ErrorState
+          className="min-h-[280px] justify-center bg-white"
+          title="El proyecto indicado no es válido"
+          description="El enlace no contiene un identificador de proyecto reconocible."
+          action={
+            <ButtonLink href="/projects" variant="secondary" size="sm">
+              Ver mis proyectos
+            </ButtonLink>
+          }
+        />
+      </div>
     );
   }
 
-  if (!validProjectId || error || !project) {
+  if (error) {
     return (
-      <main className="min-h-screen bg-surface px-4 py-10">
-        <div className="mx-auto max-w-3xl rounded-xl border border-red-200 bg-red-50 p-6">
-          <p className="text-sm text-red-700">
-            {!validProjectId
-              ? 'El proyecto indicado no es valido.'
-              : (error ?? 'No se pudo cargar el proyecto.')}
-          </p>
-          <Link
-            href="/dashboard"
-            className="mt-3 inline-block text-xs font-semibold text-red-800 underline"
-          >
-            Volver al panel
-          </Link>
-        </div>
-      </main>
+      <div className="space-y-6">
+        <BackLink href="/projects">Volver a proyectos</BackLink>
+        <ErrorState
+          className="min-h-[280px] justify-center bg-white"
+          title="No pudimos cargar el proyecto"
+          description={error}
+          onRetry={() => {
+            setError(null);
+            setReloadKey((key) => key + 1);
+          }}
+          action={
+            <ButtonLink href="/projects" variant="secondary" size="sm">
+              Ver mis proyectos
+            </ButtonLink>
+          }
+        />
+      </div>
     );
   }
 
+  if (!detail) {
+    return <ProjectDetailSkeleton />;
+  }
+
+  const { project, canManage } = detail;
   const progress =
     project.milestonesTotal > 0
       ? Math.round(
@@ -171,101 +173,117 @@ export default function ProjectDetailPage() {
       : 0;
 
   return (
-    <main className="min-h-screen bg-surface px-4 py-8">
-      <div className="mx-auto w-full max-w-6xl">
-        <Link
-          href="/dashboard"
-          className="text-xs font-semibold uppercase tracking-wide text-brand-700 hover:underline"
-        >
-          ← Volver al panel
-        </Link>
+    <div className="space-y-5">
+      <Breadcrumbs
+        items={[
+          { label: 'Panel', href: '/dashboard' },
+          { label: 'Proyectos', href: '/projects' },
+          { label: `#${project.projectId}` },
+        ]}
+      />
 
-        <header className="mt-3 rounded-2xl border border-line bg-white p-6 shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="min-w-0">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-brand-700">
-                Proyecto #{project.projectId} · {project.callTitle ?? 'Sin convocatoria'}
-              </p>
-              <h1 className="mt-1 text-2xl font-semibold text-ink">
-                {project.title}
-              </h1>
-              <p className="mt-1 text-sm text-muted">
-                {project.piName ?? 'Sin investigador principal'} ·{' '}
-                {formatDate(project.startDate)} – {formatDate(project.endDate)}
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {project.isConfidential && (
-                <span className="rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-800">
-                  Confidencial (BR-007)
-                </span>
-              )}
-              <span className="rounded-full border border-line bg-surface px-2.5 py-1 text-xs font-semibold text-ink">
-                {STATUS_LABELS[project.status] ?? project.status}
+      <PageHeader
+        title={project.title}
+        description={
+          <>
+            Proyecto #{project.projectId} ·{' '}
+            {project.callTitle ?? 'Sin convocatoria'} ·{' '}
+            {project.piName ?? 'Sin investigador principal'}
+            <br />
+            {formatDate(project.startDate)} – {formatDate(project.endDate)}
+          </>
+        }
+        actions={
+          <>
+            {project.isConfidential && (
+              <span className="rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-[11px] font-medium text-brand-800">
+                Confidencial
               </span>
-            </div>
-          </div>
-
-          <div className="mt-5">
-            <div className="flex items-center justify-between text-xs text-muted">
-              <span>Avance por hitos</span>
-              <span className="font-semibold text-ink">
-                {project.milestonesCompleted}/{project.milestonesTotal} ·{' '}
-                {progress}%
-              </span>
-            </div>
-            <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-[#e2e7f3]">
-              <div
-                className="h-full rounded-full bg-brand-600"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-          </div>
-
-          {project.isReadOnly && (
-            <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-              Expediente archivado el{' '}
-              {project.archivedAt ? formatDate(project.archivedAt) : '—'}. El
-              proyecto es de solo lectura (RF-020).
-            </p>
-          )}
-        </header>
-
-        <nav
-          className="mt-5 flex gap-1 overflow-x-auto rounded-xl border border-line bg-white p-1 shadow-sm"
-          aria-label="Secciones del proyecto"
-        >
-          {TABS.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              aria-current={tab === item.id ? 'page' : undefined}
-              onClick={() => setTab(item.id)}
-              className={`whitespace-nowrap rounded-lg px-3.5 py-2 text-xs font-semibold transition ${
-                tab === item.id
-                  ? 'bg-brand-800 text-white'
-                  : 'text-muted hover:bg-brand-50 hover:text-ink'
-              }`}
+            )}
+            <span className="rounded-full border border-line bg-white px-2.5 py-1 text-[11px] font-semibold text-ink">
+              {STATUS_LABELS[project.status] ?? project.status}
+            </span>
+            <ButtonLink
+              href={`/projects/${projectId}/documents`}
+              size="sm"
+              leadingIcon={<Icon name="folder" className="h-4 w-4" />}
             >
-              {item.label}
-            </button>
-          ))}
-        </nav>
+              Abrir expediente
+            </ButtonLink>
+          </>
+        }
+      />
 
-        <div className="mt-5">
-          {tab === 'resumen' && (
-            <div className="grid gap-5 lg:grid-cols-[1.7fr_1fr]">
-              <section className="rounded-xl border border-line bg-white p-6 shadow-sm">
-                <h2 className="text-sm font-semibold text-ink">
-                  Objetivos y alcance
-                </h2>
-                <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-ink/90">
-                  {project.objectives || 'Sin objetivos registrados.'}
+      <section className="rounded-xl border border-line bg-white p-5">
+        <div className="flex items-center justify-between text-xs text-muted">
+          <span>Avance por hitos</span>
+          <span className="font-semibold tabular-nums text-ink">
+            {project.milestonesCompleted}/{project.milestonesTotal} · {progress}%
+          </span>
+        </div>
+        <ProgressBar
+          className="mt-2"
+          label="Avance por hitos del proyecto"
+          value={progress}
+        />
+
+        {project.isReadOnly && (
+          <Alert tone="warning" className="mt-4" title="Expediente archivado">
+            Archivado el{' '}
+            {project.archivedAt ? formatDate(project.archivedAt) : '—'}. El
+            proyecto es de solo lectura: no admite cambios ni nuevas evidencias.
+          </Alert>
+        )}
+      </section>
+
+      <nav
+        role="tablist"
+        aria-label="Secciones del proyecto"
+        className="flex gap-1 overflow-x-auto rounded-xl border border-line bg-white p-1"
+      >
+        {TABS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            role="tab"
+            id={`tab-${item.id}`}
+            aria-selected={tab === item.id}
+            aria-controls={`panel-${item.id}`}
+            tabIndex={tab === item.id ? 0 : -1}
+            onClick={() => setTab(item.id)}
+            className={`whitespace-nowrap rounded-lg px-3.5 py-2 text-xs font-semibold transition-colors duration-150 ease-snappy ${
+              tab === item.id
+                ? 'bg-brand-800 text-white'
+                : 'text-muted hover:bg-brand-50 hover:text-ink'
+            }`}
+          >
+            {item.label}
+          </button>
+        ))}
+      </nav>
+
+      <div
+        role="tabpanel"
+        id={`panel-${tab}`}
+        aria-labelledby={`tab-${tab}`}
+        className="animate-fade-in"
+      >
+        {tab === 'resumen' && (
+          <div className="grid gap-5 lg:grid-cols-[1.7fr_1fr]">
+            <section className="rounded-xl border border-line bg-white p-5 lg:p-6">
+              <h2 className="text-sm font-semibold text-ink">
+                Objetivos y alcance
+              </h2>
+              <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-ink/90">
+                {project.objectives || 'Sin objetivos registrados.'}
+              </p>
+
+              <h3 className="mt-6 text-sm font-semibold text-ink">Equipo</h3>
+              {project.team.length === 0 ? (
+                <p className="mt-2 rounded-lg border border-line bg-surface-2 px-4 py-3 text-xs text-muted">
+                  Sin integrantes registrados todavía.
                 </p>
-
-                <h3 className="mt-6 text-sm font-semibold text-ink">
-                  Equipo
-                </h3>
+              ) : (
                 <ul className="mt-2 divide-y divide-line rounded-lg border border-line">
                   {project.team.map((member) => (
                     <li
@@ -280,164 +298,228 @@ export default function ProjectDetailPage() {
                       </span>
                     </li>
                   ))}
-                  {project.team.length === 0 && (
-                    <li className="px-4 py-4 text-sm text-muted">
-                      Sin integrantes registrados.
-                    </li>
-                  )}
                 </ul>
+              )}
+            </section>
+
+            <aside className="space-y-4">
+              <section className="rounded-xl border border-line bg-white p-5">
+                <h2 className="text-sm font-semibold text-ink">
+                  Datos institucionales
+                </h2>
+                <dl className="mt-3 space-y-2 text-xs">
+                  <Row label="Convocatoria" value={project.callTitle ?? '—'} />
+                  <Row
+                    label="Presupuesto"
+                    value={
+                      project.budgetEnabled && project.budgetSpent !== null
+                        ? formatCurrency(project.budgetSpent)
+                        : 'No habilitado'
+                    }
+                  />
+                  <Row
+                    label="Último cambio de estado"
+                    value={formatDate(project.statusChangedAt)}
+                  />
+                  <Row
+                    label="Retención programada"
+                    value={
+                      project.retentionDeleteAt
+                        ? formatDate(project.retentionDeleteAt)
+                        : 'No definida'
+                    }
+                  />
+                </dl>
               </section>
 
-              <aside className="space-y-4">
-                <section className="rounded-xl border border-line bg-white p-5 shadow-sm">
-                  <h2 className="text-sm font-semibold text-ink">
-                    Datos institucionales
-                  </h2>
-                  <dl className="mt-3 space-y-2 text-xs">
-                    <Row label="Convocatoria" value={project.callTitle ?? '—'} />
-                    <Row
-                      label="Presupuesto"
-                      value={
-                        project.budgetEnabled &&
-                        project.budgetSpent !== null
-                          ? formatCurrency(project.budgetSpent)
-                          : 'No habilitado'
-                      }
-                    />
-                    <Row
-                      label="Ultimo cambio de estado"
-                      value={formatDate(project.statusChangedAt)}
-                    />
-                    <Row
-                      label="Retencion programada"
-                      value={
-                        project.retentionDeleteAt
-                          ? formatDate(project.retentionDeleteAt)
-                          : 'No definida'
-                      }
-                    />
-                  </dl>
-                </section>
+              <section className="rounded-xl border border-line bg-white p-5">
+                <h2 className="text-sm font-semibold text-ink">
+                  Banderas de investigación
+                </h2>
+                <ul className="mt-3 space-y-2 text-xs text-ink">
+                  <Flag
+                    label="Involucra seres humanos"
+                    active={project.researchInvolvesHumans}
+                  />
+                  <Flag
+                    label="Involucra animales"
+                    active={project.researchInvolvesAnimals}
+                  />
+                  <Flag
+                    label="Usa datos sensibles"
+                    active={project.usesSensitiveData}
+                  />
+                  <Flag
+                    label="Anonimización certificada"
+                    active={project.anonymizationCertified}
+                  />
+                </ul>
+              </section>
+            </aside>
+          </div>
+        )}
 
-                <section className="rounded-xl border border-line bg-white p-5 shadow-sm">
-                  <h2 className="text-sm font-semibold text-ink">
-                    Banderas de investigacion
-                  </h2>
-                  <ul className="mt-3 space-y-2 text-xs text-ink">
-                    <Flag
-                      label="Involucra seres humanos"
-                      active={project.researchInvolvesHumans}
-                    />
-                    <Flag
-                      label="Involucra animales"
-                      active={project.researchInvolvesAnimals}
-                    />
-                    <Flag
-                      label="Usa datos sensibles"
-                      active={project.usesSensitiveData}
-                    />
-                    <Flag
-                      label="Anonimizacion certificada (BR-012)"
-                      active={project.anonymizationCertified}
-                    />
-                  </ul>
-                </section>
-              </aside>
-            </div>
-          )}
+        {tab === 'equipo' && (
+          <TeamPanel
+            projectId={projectId}
+            canManage={canManage}
+            readOnly={project.isReadOnly}
+          />
+        )}
 
-          {tab === 'equipo' && (
-            <TeamPanel
-              projectId={projectId}
-              canManage={canManage}
-              readOnly={project.isReadOnly}
-            />
-          )}
+        {tab === 'hitos' && (
+          <MilestonesPanel
+            projectId={projectId}
+            canManage={canManage}
+            currentUserId={user.id}
+            readOnly={project.isReadOnly}
+          />
+        )}
 
-          {tab === 'hitos' && (
-            <MilestonesPanel
-              projectId={projectId}
-              canManage={canManage}
-              currentUserId={userId}
-              readOnly={project.isReadOnly}
-            />
-          )}
-
-          {tab === 'documentos' && (
-            <section className="rounded-xl border border-line bg-white p-6 shadow-sm">
-              <h2 className="text-sm font-semibold text-ink">
-                Expediente documental, versiones y productos
-              </h2>
-              <p className="mt-2 text-sm text-muted">
-                La carga de evidencia, el control de visibilidad, las versiones
-                de propuesta y los productos de investigacion se gestionan en
-                el expediente del proyecto.
-              </p>
-              <Link
+        {tab === 'documentos' && (
+          <section className="rounded-xl border border-line bg-white p-5 lg:p-6">
+            <h2 className="text-sm font-semibold text-ink">
+              Expediente documental, versiones y productos
+            </h2>
+            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
+              La carga de evidencia, el control de visibilidad, las versiones de
+              propuesta y los productos de investigación se gestionan en el
+              expediente del proyecto.
+            </p>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <ButtonLink
                 href={`/projects/${projectId}/documents`}
-                className="mt-4 inline-flex items-center gap-2 rounded-md bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800"
+                leadingIcon={<Icon name="folder" className="h-4 w-4" />}
               >
-                <Icon name="folder" className="h-4 w-4" />
                 Abrir expediente
-              </Link>
-              <p className="mt-3 text-xs text-muted">
+              </ButtonLink>
+              <span className="text-xs text-muted">
                 {project.milestonesCompleted} de {project.milestonesTotal} hitos
                 completados.
-              </p>
-            </section>
-          )}
+              </span>
+            </div>
+          </section>
+        )}
 
-          {tab === 'historial' && (
-            <section className="overflow-hidden rounded-xl border border-line bg-white shadow-sm">
-              <header className="border-b border-line px-5 py-3">
-                <h2 className="text-sm font-semibold text-ink">
-                  Historial de estados (RF-003)
-                </h2>
-              </header>
-              {historyError && (
-                <p className="px-5 py-6 text-sm text-red-700">{historyError}</p>
-              )}
-              {!historyError && history === null && (
-                <p className="px-5 py-6 text-sm text-muted">
-                  Cargando historial…
-                </p>
-              )}
-              {history && history.length === 0 && (
-                <p className="px-5 py-8 text-center text-sm text-muted">
-                  El proyecto aun no registra transiciones de estado.
-                </p>
-              )}
-              {history && history.length > 0 && (
-                <ol className="divide-y divide-line">
-                  {history.map((entry) => (
-                    <li key={entry.transitionId} className="px-5 py-4">
-                      <div className="flex flex-wrap items-center gap-2 text-sm">
-                        <span className="font-medium text-ink">
-                          {STATUS_LABELS[entry.fromStatus] ?? entry.fromStatus}
-                        </span>
-                        <span className="text-muted">→</span>
-                        <span className="font-semibold text-brand-800">
-                          {STATUS_LABELS[entry.toStatus] ?? entry.toStatus}
-                        </span>
-                        <span className="ml-auto text-xs text-muted">
-                          {formatDate(entry.createdAt)}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs text-muted">
-                        Por {entry.actorName}
-                        {entry.justification
-                          ? ` · ${entry.justification}`
-                          : ''}
-                      </p>
-                    </li>
-                  ))}
-                </ol>
-              )}
-            </section>
-          )}
+        {tab === 'historial' && (
+          <section className="overflow-hidden rounded-xl border border-line bg-white">
+            <header className="border-b border-line px-5 py-3">
+              <h2 className="text-sm font-semibold text-ink">
+                Historial de estados
+              </h2>
+            </header>
+
+            {historyError && (
+              <div className="p-5">
+                <ErrorState
+                  compact
+                  title="No pudimos cargar el historial"
+                  description={historyError}
+                  onRetry={() => {
+                    setHistoryError(null);
+                    setHistoryAttempt((attempt) => attempt + 1);
+                  }}
+                />
+              </div>
+            )}
+
+            {!historyError && history === null && (
+              <div aria-busy="true" className="space-y-4 px-5 py-5">
+                <span className="sr-only">Cargando historial…</span>
+                {[0, 1, 2].map((index) => (
+                  <div key={index} aria-hidden="true" className="space-y-1.5">
+                    <Skeleton className="h-3 w-48" />
+                    <Skeleton className="h-2.5 w-64 max-w-full" />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {history && history.length === 0 && (
+              <EmptyState
+                compact
+                className="m-5"
+                title="Sin transiciones registradas"
+                description="El proyecto todavía no registra cambios de estado en su ciclo de vida."
+              />
+            )}
+
+            {history && history.length > 0 && (
+              <ol className="divide-y divide-line">
+                {history.map((entry) => (
+                  <li key={entry.transitionId} className="px-5 py-4">
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                      <span className="font-medium text-ink">
+                        {STATUS_LABELS[entry.fromStatus] ?? entry.fromStatus}
+                      </span>
+                      <Icon
+                        name="chevronRight"
+                        className="h-3 w-3 text-line-strong"
+                      />
+                      <span className="font-semibold text-brand-800">
+                        {STATUS_LABELS[entry.toStatus] ?? entry.toStatus}
+                      </span>
+                      <span className="ml-auto text-xs text-muted">
+                        {formatDate(entry.createdAt)}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-muted">
+                      Por {entry.actorName}
+                      {entry.justification ? ` · ${entry.justification}` : ''}
+                    </p>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
+        )}
+      </div>
+
+      <p className="text-xs">
+        <Link
+          href="/projects"
+          className="rounded font-medium text-muted transition-colors duration-150 hover:text-brand-700"
+        >
+          ← Volver a la lista de proyectos
+        </Link>
+      </p>
+    </div>
+  );
+}
+
+function ProjectDetailSkeleton() {
+  return (
+    <div className="space-y-5" aria-busy="true">
+      <span className="sr-only">Cargando proyecto…</span>
+      <Skeleton className="h-3 w-40" />
+      <div className="space-y-2">
+        <Skeleton className="h-7 w-3/4 max-w-lg" />
+        <Skeleton className="h-3 w-2/3 max-w-md" />
+      </div>
+      <div className="rounded-xl border border-line bg-white p-5">
+        <Skeleton className="h-3 w-32" />
+        <Skeleton className="mt-3 h-2 w-full rounded-full" />
+      </div>
+      <div className="flex gap-1 rounded-xl border border-line bg-white p-1">
+        {[0, 1, 2, 3, 4].map((index) => (
+          <Skeleton key={index} className="h-8 w-24 rounded-lg" />
+        ))}
+      </div>
+      <div className="grid gap-5 lg:grid-cols-[1.7fr_1fr]">
+        <div className="rounded-xl border border-line bg-white p-5">
+          <Skeleton className="h-4 w-40" />
+          <Skeleton className="mt-4 h-3 w-full" />
+          <Skeleton className="mt-2 h-3 w-5/6" />
+          <Skeleton className="mt-2 h-3 w-2/3" />
+        </div>
+        <div className="rounded-xl border border-line bg-white p-5">
+          <Skeleton className="h-4 w-36" />
+          <Skeleton className="mt-4 h-3 w-full" />
+          <Skeleton className="mt-2 h-3 w-full" />
+          <Skeleton className="mt-2 h-3 w-3/4" />
         </div>
       </div>
-    </main>
+    </div>
   );
 }
 
@@ -457,8 +539,8 @@ function Flag({ label, active }: { label: string; active: boolean }) {
       <span
         className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
           active
-            ? 'bg-amber-50 text-amber-800'
-            : 'bg-surface text-muted'
+            ? 'bg-warning-soft text-warning'
+            : 'bg-surface-2 text-muted'
         }`}
       >
         {active ? 'Sí' : 'No'}

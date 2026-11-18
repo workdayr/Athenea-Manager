@@ -1,6 +1,13 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
+import { Alert } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import { PageHeader } from '@/components/ui/page-header';
+import { Skeleton, SkeletonCard, SkeletonRows } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/toast-provider';
 import { useQuery } from '@apollo/client/react';
 import { Icon } from './icons';
@@ -35,17 +42,17 @@ const PAGE_SIZE = 10;
 const SEARCH_DEBOUNCE_MS = 300;
 
 const SLA_STYLES: Record<SlaStatus, string> = {
-  on_track: 'border-brand-100 bg-[#eef2fb] text-brand-800',
-  at_risk: 'border-red-200 bg-red-50 text-red-700',
-  upcoming: 'border-line bg-[#f1f3f9] text-muted',
+  on_track: 'border-info-line bg-info-soft text-brand-800',
+  at_risk: 'border-danger-line bg-danger-soft text-danger',
+  upcoming: 'border-line bg-surface-3 text-muted',
   no_milestones: 'border-line bg-white text-muted',
 };
 
 const SLA_DOT: Record<SlaStatus, string> = {
   on_track: 'bg-brand-500',
-  at_risk: 'bg-red-500',
-  upcoming: 'bg-[#9aa5bb]',
-  no_milestones: 'bg-[#c6cddb]',
+  at_risk: 'bg-danger',
+  upcoming: 'bg-muted/60',
+  no_milestones: 'bg-line-strong',
 };
 
 const TIME_FORMATTER = new Intl.DateTimeFormat('es-MX', {
@@ -246,8 +253,7 @@ export function AdminDashboard({
     setPage(1);
   }
 
-  async function handleExport(format: 'csv' | 'pdf') {
-    // F2-05 / RF-008: el servidor genera el archivo con TODOS los registros
+  async function handleExport(format: 'csv' | 'pdf') {    // F2-05 / RF-008: el servidor genera el archivo con TODOS los registros
     // que cumplen los filtros (no solo la pagina visible) y aplica la
     // visibilidad por rol, incluido el presupuesto oculto al Comité.
     setExporting(format);
@@ -269,28 +275,30 @@ export function AdminDashboard({
     }
   }
 
+  const hasFilters =
+    phaseFilter !== null || status !== 'all' || call !== 'all' || search.length > 0;
+
+  function clearFilters() {
+    setPhaseFilter(null);
+    setStatus('all');
+    setCall('all');
+    setSearch('');
+    onSearchChange('');
+    setPage(1);
+  }
+
   if (!metrics && loading) {
-    return (
-      <DashboardState
-        title="Cargando tablero institucional…"
-        description="Consultando proyectos, presupuesto y productividad del ciclo."
-        icon="refresh"
-        spinning
-      />
-    );
+    return <AdminDashboardSkeleton />;
   }
 
   if (!metrics && error) {
     return (
-      <DashboardState
-        title="No se pudo cargar el tablero"
+      <ErrorState
+        className="min-h-[420px] justify-center bg-white"
+        title="No pudimos cargar el tablero"
         description={error}
-        icon="alert"
-        action={{
-          label: 'Reintentar',
-          onClick: () => {
-            void refetch();
-          },
+        onRetry={() => {
+          void refetch();
         }}
       />
     );
@@ -298,18 +306,63 @@ export function AdminDashboard({
 
   return (
     <div className="space-y-6">
-      <header>
-        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted">
-          UNIPOLI · Vicerrectoría de I+D+I ·{' '}
-          <span className="text-brand-700">Ciclo {year}</span>
-        </p>
+      <div className="space-y-3">
+        <PageHeader
+          title="Tablero de Control Institucional"
+          description="Supervisión estratégica de protocolos, comités evaluadores, metas SLA y ejercicio de fondos."
+          actions={
+            <>
+              <label className="sr-only" htmlFor="dashboard-year">
+                Ciclo activo
+              </label>
+              <select
+                id="dashboard-year"
+                value={year}
+                onChange={(event) => {
+                  setYear(Number(event.target.value));
+                  setPage(1);
+                }}
+                className="h-9 rounded-lg border border-line-strong bg-white px-3 pr-8 text-xs font-medium text-ink transition-colors duration-150 hover:border-brand-300 focus:border-brand-400"
+              >
+                {yearOptions.map((option, index) => (
+                  <option key={option} value={option}>
+                    {index === 0
+                      ? `Ciclo ${option} (activo)`
+                      : `Ciclo ${option} (cerrado)`}
+                  </option>
+                ))}
+              </select>
+              <Button
+                size="sm"
+                onClick={() => void handleExport('csv')}
+                loading={exporting === 'csv'}
+                disabled={rows.length === 0 || exporting !== null}
+                leadingIcon={<Icon name="download" className="h-4 w-4" />}
+                title="Exporta todos los proyectos que cumplen los filtros en CSV (RF-008)"
+              >
+                {exporting === 'csv' ? 'Exportando…' : 'Informe CSV'}
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => void handleExport('pdf')}
+                loading={exporting === 'pdf'}
+                disabled={rows.length === 0 || exporting !== null}
+                leadingIcon={<Icon name="download" className="h-4 w-4" />}
+                title="Descarga el informe ejecutivo en PDF con los mismos filtros"
+              >
+                {exporting === 'pdf' ? 'Exportando…' : 'PDF'}
+              </Button>
+            </>
+          }
+        />
 
-        <div className="mt-2 flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span
             className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10.5px] font-medium ${
               data?.fromCache
-                ? 'border-brand-100 bg-brand-50 text-brand-800'
-                : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                ? 'border-info-line bg-info-soft text-brand-800'
+                : 'border-success-line bg-success-soft text-success'
             }`}
             title={
               data
@@ -318,16 +371,15 @@ export function AdminDashboard({
             }
           >
             <span
+              aria-hidden="true"
               className={`h-1.5 w-1.5 rounded-full ${
-                data?.fromCache ? 'bg-brand-500' : 'bg-emerald-500'
+                data?.fromCache ? 'bg-brand-500' : 'bg-success'
               }`}
             />
-            {data?.fromCache
-              ? 'Caché activa (≤ 15 min)'
-              : 'Datos en vivo (RF-008)'}
+            {data?.fromCache ? 'Caché activa (≤ 15 min)' : 'Datos en vivo'}
           </span>
           <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-white px-2.5 py-1 text-[10.5px] font-medium text-muted">
-            P95 &lt; 3s (RF-013)
+            P95 &lt; 3 s
             {data && (
               <strong className="font-semibold text-ink">
                 · {Math.max(0, Math.round(data.computationMs))} ms
@@ -338,86 +390,35 @@ export function AdminDashboard({
             <Icon name="eye" className="h-3 w-3" />
             Vista: {roleScopeLabel(user.role)}
           </span>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-white px-2.5 py-1 text-[10.5px] font-medium text-muted">
+            Ciclo {year}
+          </span>
           {loading && (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10.5px] font-medium text-amber-800">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-warning-line bg-warning-soft px-2.5 py-1 text-[10.5px] font-medium text-warning">
+              <span aria-hidden="true" className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" />
               Actualizando…
             </span>
           )}
         </div>
-
-        <div className="mt-3 flex flex-col gap-4 xl:flex-row xl:flex-wrap xl:items-start xl:justify-between">
-          <div className="min-w-0 xl:min-w-[520px] xl:flex-1">
-            <h1 className="text-[30px] font-semibold leading-tight tracking-tight text-ink sm:text-[36px]">
-              Tablero de Control Institucional
-            </h1>
-            <p className="mt-1 max-w-2xl text-[13px] leading-relaxed text-muted">
-              Supervisión estratégica de protocolos, comités evaluadores, metas
-              SLA y ejercicio de fondos.
-            </p>
-          </div>
-
-          <div className="flex shrink-0 flex-wrap items-center gap-2.5 xl:ml-auto">
-            <label className="sr-only" htmlFor="dashboard-year">
-              Ciclo activo
-            </label>
-            <select
-              id="dashboard-year"
-              value={year}
-              onChange={(event) => {
-                setYear(Number(event.target.value));
-                setPage(1);
-              }}
-              className="h-9 rounded-md border border-line bg-white px-3 pr-8 text-xs font-medium text-ink focus:border-brand-300 focus:outline-none"
-            >
-              {yearOptions.map((option, index) => (
-                <option key={option} value={option}>
-                  {index === 0
-                    ? `Año en Curso ${option} (Ciclo Activo)`
-                    : `Ciclo ${option} (Cerrado)`}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={() => void handleExport('csv')}
-              disabled={rows.length === 0 || exporting !== null}
-              className="inline-flex h-9 items-center gap-2 rounded-md bg-brand-900 px-3.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-50"
-              title="Exporta todos los proyectos que cumplen los filtros en CSV (RF-008)"
-            >
-              <Icon name="download" className="h-4 w-4" />
-              {exporting === 'csv' ? 'Exportando…' : 'Exportar Informe Ejecutivo'}
-              <span className="text-[10px] font-medium text-white/70">CSV</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleExport('pdf')}
-              disabled={rows.length === 0 || exporting !== null}
-              className="inline-flex h-9 items-center gap-2 rounded-md border border-line bg-white px-3.5 text-xs font-semibold text-ink shadow-sm transition hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-50"
-              title="Descarga el informe ejecutivo en PDF con los mismos filtros"
-            >
-              <Icon name="download" className="h-4 w-4" />
-              {exporting === 'pdf' ? 'Exportando…' : 'PDF'}
-            </button>
-          </div>
-        </div>
-      </header>
+      </div>
 
       {error && metrics && (
-        <div
-          role="alert"
-          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-[11.5px] text-red-800"
+        <Alert
+          tone="danger"
+          action={
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                void refetch();
+              }}
+            >
+              Reintentar
+            </Button>
+          }
         >
-          <span>{error}</span>
-          <button
-            type="button"
-            onClick={() => {
-              void refetch();
-            }}
-            className="rounded-md border border-red-300 bg-white px-2.5 py-1 font-semibold text-red-700"
-          >
-            Reintentar
-          </button>
-        </div>
+          {error}
+        </Alert>
       )}
 
       <section
@@ -430,7 +431,7 @@ export function AdminDashboard({
       </section>
 
       <div className="grid items-start gap-5 xl:grid-cols-[1.55fr_1fr]">
-        <section className="rounded-xl border border-line bg-white p-5 shadow-[0_1px_2px_rgba(16,35,61,0.04)]">
+        <section className="rounded-xl border border-line bg-white p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="text-[17px] font-semibold tracking-tight text-ink">
@@ -464,9 +465,9 @@ export function AdminDashboard({
                       proyectos ({item.share}%)
                     </span>
                   </div>
-                  <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-[#eef1f7]">
+                  <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-surface-3">
                     <div
-                      className={`h-full rounded-full ${item.barClassName}`}
+                      className={`h-full rounded-full transition-[width] duration-500 ease-snappy ${item.barClassName}`}
                       style={{ width: `${item.share}%` }}
                     />
                   </div>
@@ -474,13 +475,16 @@ export function AdminDashboard({
               ))}
             </ul>
           ) : (
-            <p className="mt-6 rounded-lg border border-line bg-[#f8f9fd] px-4 py-6 text-center text-[11.5px] text-muted">
-              No hay proyectos registrados para el periodo seleccionado.
-            </p>
+            <EmptyState
+              compact
+              className="mt-5"
+              title="Sin proyectos en el periodo"
+              description="No hay proyectos registrados para el ciclo seleccionado."
+            />
           )}
 
           {canSeeBudget && metrics && metrics.budget.spent !== null ? (
-            <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-[#f8f9fd] px-3 py-2.5">
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-line bg-surface-2 px-3 py-2.5">
               <span className="flex min-w-0 items-center gap-2 text-[11.5px] text-ink">
                 <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-white text-brand-700">
                   <Icon name="wallet" className="h-4 w-4" />
@@ -499,14 +503,14 @@ export function AdminDashboard({
               </span>
             </div>
           ) : (
-            <div className="mt-5 rounded-lg border border-line bg-[#f8f9fd] px-3 py-2.5 text-[10.5px] text-muted">
+            <div className="mt-5 rounded-lg border border-line bg-surface-2 px-3 py-2.5 text-[10.5px] text-muted">
               Vista de Comité: las cifras presupuestales están restringidas por
               rol (RF-001).
             </div>
           )}
         </section>
 
-        <section className="rounded-xl border border-line bg-white p-5 shadow-[0_1px_2px_rgba(16,35,61,0.04)]">
+        <section className="rounded-xl border border-line bg-white p-5">
           <div className="flex items-start justify-between gap-3">
             <h2 className="text-[17px] font-semibold tracking-tight text-ink">
               Embudo del Ciclo de Vida
@@ -536,7 +540,7 @@ export function AdminDashboard({
         </section>
       </div>
 
-      <section className="rounded-xl border border-line bg-white shadow-[0_1px_2px_rgba(16,35,61,0.04)]">
+      <section className="rounded-xl border border-line bg-white">
         <div className="flex flex-wrap items-start justify-between gap-3 px-5 pt-5">
           <div>
             <h2 className="text-[17px] font-semibold tracking-tight text-ink">
@@ -548,7 +552,7 @@ export function AdminDashboard({
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <span className="rounded-full border border-line bg-[#f8f9fd] px-2.5 py-1 text-[10.5px] font-medium text-muted">
+            <span className="rounded-full border border-line bg-surface-2 px-2.5 py-1 text-[10.5px] font-medium text-muted" aria-live="polite">
               {totalFiltered} registros
             </span>
             <button
@@ -578,7 +582,7 @@ export function AdminDashboard({
             <input
               aria-label="Buscar proyecto"
               placeholder="Buscar por título o investigador principal…"
-              className="h-9 w-full rounded-md border border-line bg-[#f8f9fd] pl-8 pr-3 text-[11.5px] text-ink placeholder:text-muted focus:border-brand-300 focus:bg-white focus:outline-none"
+              className="h-9 w-full rounded-lg border border-line-strong bg-surface-2 pl-8 pr-3 text-[11.5px] text-ink transition-colors duration-150 placeholder:text-muted hover:border-brand-300 focus:border-brand-400 focus:bg-white"
               value={query}
               onChange={(event) => onSearchChange(event.target.value)}
             />
@@ -606,6 +610,16 @@ export function AdminDashboard({
             }))}
             allLabel="Convocatoria: Todas"
           />
+          {hasFilters && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={clearFilters}
+              className="text-xs"
+            >
+              Limpiar filtros
+            </Button>
+          )}
         </div>
 
         <div className="mt-4 overflow-x-auto">
@@ -615,7 +629,7 @@ export function AdminDashboard({
               convocatoria, hito actual, estado y semáforo SLA
             </caption>
             <thead>
-              <tr className="border-y border-line bg-[#f8f9fd] text-[9.5px] font-semibold uppercase tracking-[0.08em] text-muted">
+              <tr className="border-y border-line bg-surface-2 text-[9.5px] font-semibold uppercase tracking-[0.08em] text-muted">
                 <th scope="col" className="px-5 py-2.5">
                   Clave / ID
                 </th>
@@ -648,12 +662,19 @@ export function AdminDashboard({
               ))}
               {!loading && rows.length === 0 && (
                 <tr>
-                  <td
-                    colSpan={7}
-                    className="px-5 py-10 text-center text-[12px] text-muted"
-                  >
-                    No hay proyectos que coincidan con los filtros
-                    seleccionados.
+                  <td colSpan={7} className="px-5 py-10">
+                    <EmptyState
+                      compact
+                      title="No hay proyectos que coincidan con los filtros"
+                      description="Prueba con otro estado, otra convocatoria o limpia los filtros activos."
+                      action={
+                        hasFilters ? (
+                          <Button size="sm" variant="secondary" onClick={clearFilters}>
+                            Limpiar filtros
+                          </Button>
+                        ) : undefined
+                      }
+                    />
                   </td>
                 </tr>
               )}
@@ -662,7 +683,7 @@ export function AdminDashboard({
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-5 py-3">
-          <p className="text-[11px] text-muted">
+          <p className="text-[11px] text-muted" aria-live="polite">
             Mostrando{' '}
             <strong className="font-semibold text-ink">
               {pageStart}–{pageEnd}
@@ -675,7 +696,7 @@ export function AdminDashboard({
             )}
           </p>
           <div className="flex items-center gap-2">
-            <span className="rounded-md border border-line bg-[#f8f9fd] px-2 py-1 text-[10px] font-medium text-muted">
+            <span className="rounded-md border border-line bg-surface-2 px-2 py-1 text-[10px] font-medium text-muted">
               Paginación servidor ({PAGE_SIZE}/página)
             </span>
             <div className="flex items-center gap-1">
@@ -721,7 +742,7 @@ export function AdminDashboard({
         </div>
       </section>
 
-      <footer className="flex flex-col gap-3 rounded-xl border border-line bg-[#f1f5fd] px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <footer className="flex flex-col gap-3 rounded-xl border border-line bg-brand-50 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-start gap-2.5">
           <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-white text-brand-700">
             <Icon name="shield" className="h-4 w-4" />
@@ -754,16 +775,25 @@ function ProjectRow({ project }: { project: PriorityProject }) {
   const isLate = project.sla === 'at_risk';
 
   return (
-    <tr className="border-b border-line/70 align-top transition hover:bg-[#fafbfe]">
+    <tr className="border-b border-line/70 align-top transition-colors duration-150 hover:bg-surface-2">
       <td className="px-5 py-3.5">
         <span className="whitespace-nowrap text-[10.5px] font-semibold tracking-wide text-brand-700">
           {project.id}
         </span>
       </td>
       <td className="max-w-[320px] px-3 py-3.5">
-        <p className="text-[12px] font-semibold leading-snug text-ink">
-          {project.title}
-        </p>
+        <Link
+          href={`/projects/${project.projectId}`}
+          className="group inline-flex items-start gap-1 rounded text-[12px] font-semibold leading-snug text-ink transition-colors duration-150 hover:text-brand-700"
+        >
+          <span className="underline-offset-2 group-hover:underline">
+            {project.title}
+          </span>
+          <Icon
+            name="chevronRight"
+            className="mt-0.5 h-3 w-3 shrink-0 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+          />
+        </Link>
       </td>
       <td className="px-3 py-3.5">
         <span className="flex items-center gap-2">
@@ -781,7 +811,7 @@ function ProjectRow({ project }: { project: PriorityProject }) {
       <td className="px-3 py-3.5">
         <p
           className={`text-[11.5px] font-medium leading-snug ${
-            isLate ? 'text-red-700' : 'text-ink'
+            isLate ? 'text-danger' : 'text-ink'
           }`}
         >
           {project.milestone}
@@ -795,7 +825,7 @@ function ProjectRow({ project }: { project: PriorityProject }) {
         </p>
       </td>
       <td className="px-3 py-3.5">
-        <span className="inline-flex whitespace-nowrap rounded-full border border-line bg-[#f8f9fd] px-2.5 py-1 text-[10px] font-medium text-ink">
+        <span className="inline-flex whitespace-nowrap rounded-full border border-line bg-surface-2 px-2.5 py-1 text-[10px] font-medium text-ink">
           {STATUS_LABELS[project.projectStatus] ?? project.projectStatus}
         </span>
       </td>
@@ -813,59 +843,52 @@ function ProjectRow({ project }: { project: PriorityProject }) {
   );
 }
 
-function SkeletonRows({ rows, columns }: { rows: number; columns: number }) {
+function AdminDashboardSkeleton() {
   return (
-    <>
-      {Array.from({ length: rows }, (_, rowIndex) => (
-        <tr key={`skeleton-${rowIndex}`} className="border-b border-line/70">
-          {Array.from({ length: columns }, (_, columnIndex) => (
-            <td key={`cell-${columnIndex}`} className="px-3 py-4">
-              <span className="block h-2.5 w-full animate-pulse rounded bg-[#e8edf7]" />
-            </td>
-          ))}
-        </tr>
-      ))}
-    </>
-  );
-}
-
-function DashboardState({
-  title,
-  description,
-  icon,
-  spinning,
-  action,
-}: {
-  title: string;
-  description: string;
-  icon: 'refresh' | 'alert';
-  spinning?: boolean;
-  action?: { label: string; onClick: () => void };
-}) {
-  return (
-    <div className="grid min-h-[420px] place-items-center rounded-xl border border-line bg-white p-8">
-      <div className="flex max-w-md flex-col items-center text-center">
-        <span className="grid h-12 w-12 place-items-center rounded-xl bg-brand-50 text-brand-700">
-          <Icon
-            name={icon}
-            className={`h-6 w-6 ${spinning ? 'animate-spin' : ''}`}
-          />
-        </span>
-        <h2 className="mt-4 text-[18px] font-semibold tracking-tight text-ink">
-          {title}
-        </h2>
-        <p className="mt-1.5 text-[12px] leading-relaxed text-muted">
-          {description}
-        </p>
-        {action && (
-          <button
-            type="button"
-            onClick={action.onClick}
-            className="mt-5 inline-flex h-9 items-center rounded-md bg-brand-900 px-4 text-xs font-semibold text-white transition hover:bg-brand-800"
-          >
-            {action.label}
-          </button>
-        )}
+    <div className="space-y-6" aria-busy="true">
+      <span className="sr-only">Cargando tablero institucional…</span>
+      <div className="space-y-2">
+        <Skeleton className="h-7 w-80 max-w-full" />
+        <Skeleton className="h-3 w-[28rem] max-w-full" />
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {[0, 1, 2, 3].map((index) => (
+          <SkeletonCard key={index} />
+        ))}
+      </div>
+      <div className="grid items-start gap-5 xl:grid-cols-[1.55fr_1fr]">
+        <div className="rounded-xl border border-line bg-white p-5">
+          <Skeleton className="h-4 w-56" />
+          <div className="mt-5 space-y-4">
+            {[0, 1, 2, 3].map((index) => (
+              <div key={index}>
+                <div className="flex items-center justify-between gap-3">
+                  <Skeleton className="h-3 w-40" />
+                  <Skeleton className="h-3 w-24" />
+                </div>
+                <Skeleton className="mt-2 h-2 w-full" />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="rounded-xl border border-line bg-white p-5">
+          <Skeleton className="h-4 w-48" />
+          <div className="mt-5 space-y-2">
+            {[0, 1, 2, 3, 4].map((index) => (
+              <Skeleton key={index} className="h-12 w-full" />
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="overflow-hidden rounded-xl border border-line bg-white">
+        <div className="border-b border-line px-5 py-4">
+          <Skeleton className="h-4 w-64" />
+        </div>
+        <table className="w-full">
+          <tbody>
+            <SkeletonRows rows={5} columns={6} />
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -891,7 +914,7 @@ function FilterSelect({
         aria-label={label}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="h-9 rounded-md border border-line bg-white px-2.5 text-[11px] font-medium text-ink focus:border-brand-300 focus:outline-none"
+        className="h-9 rounded-lg border border-line-strong bg-white px-2.5 text-[11px] font-medium text-ink transition-colors duration-150 hover:border-brand-300 focus:border-brand-400"
       >
         <option value="all">{allLabel}</option>
         {options.map((option) => (

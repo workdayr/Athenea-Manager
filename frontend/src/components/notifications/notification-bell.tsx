@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/dashboard/icons';
+import { useOverlayBehavior } from '@/components/ui/modal';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   fetchNotifications,
   fetchUnreadNotificationCount,
@@ -54,6 +56,9 @@ export function NotificationBell() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useOverlayBehavior(open, panelRef, () => setOpen(false));
 
   const load = useCallback(async (showLoading = false) => {
     if (showLoading) {
@@ -109,16 +114,9 @@ export function NotificationBell() {
         setOpen(false);
       }
     };
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setOpen(false);
-      }
-    };
     document.addEventListener('mousedown', handlePointer);
-    document.addEventListener('keydown', handleKey);
     return () => {
       document.removeEventListener('mousedown', handlePointer);
-      document.removeEventListener('keydown', handleKey);
     };
   }, [open]);
 
@@ -169,7 +167,7 @@ export function NotificationBell() {
       <button
         type="button"
         onClick={() => void togglePanel()}
-        className="relative grid h-9 w-9 place-items-center rounded-lg border border-line text-muted transition hover:text-ink"
+        className="relative grid h-9 w-9 place-items-center rounded-lg border border-line text-muted transition-colors duration-150 hover:bg-surface-2 hover:text-ink"
         aria-label={
           unreadCount > 0
             ? `Notificaciones (${unreadCount} sin leer)`
@@ -180,22 +178,26 @@ export function NotificationBell() {
       >
         <Icon name="bell" className="h-4 w-4" />
         {unreadCount > 0 && (
-          <span className="absolute -right-1 -top-1 grid min-w-4 place-items-center rounded-full bg-red-500 px-1 text-[9px] font-semibold leading-4 text-white ring-2 ring-white">
+          <span className="absolute -right-1 -top-1 grid min-w-4 place-items-center rounded-full bg-danger px-1 text-[9px] font-semibold leading-4 text-white ring-2 ring-white">
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}
       </button>
+      <span className="sr-only" aria-live="polite">
+        {unreadCount > 0 ? `${unreadCount} notificaciones sin leer` : ''}
+      </span>
 
       {open && (
         <div
+          ref={panelRef}
           role="dialog"
           aria-label="Notificaciones"
-          className="absolute right-0 top-11 z-50 w-80 overflow-hidden rounded-xl border border-line bg-white shadow-xl"
+          className="absolute right-0 top-11 z-50 w-[min(20rem,calc(100vw-2rem))] origin-top-right animate-scale-in overflow-hidden rounded-xl border border-line bg-white shadow-overlay outline-none"
         >
           <div className="flex items-center justify-between border-b border-line px-4 py-3">
             <div>
               <p className="text-sm font-semibold text-ink">Notificaciones</p>
-              <p className="text-[11px] text-muted">
+              <p className="text-[11px] text-muted" aria-live="polite">
                 {unreadCount > 0
                   ? `${unreadCount} sin leer`
                   : 'Todo al día'}
@@ -205,7 +207,7 @@ export function NotificationBell() {
               type="button"
               onClick={() => void handleMarkAll()}
               disabled={unreadCount === 0}
-              className="rounded-md px-2 py-1 text-[11px] font-medium text-brand-700 transition hover:bg-brand-50 disabled:opacity-40"
+              className="rounded-md px-2 py-1 text-[11px] font-medium text-brand-700 transition-colors duration-150 hover:bg-brand-50 disabled:opacity-40"
             >
               Marcar todas
             </button>
@@ -213,26 +215,42 @@ export function NotificationBell() {
 
           <div className="max-h-96 overflow-y-auto">
             {loading && (
-              <p className="px-4 py-6 text-center text-xs text-muted">
-                Cargando notificaciones…
-              </p>
+              <div aria-busy="true" className="space-y-3 px-4 py-4">
+                <span className="sr-only">Cargando notificaciones…</span>
+                {[0, 1, 2].map((index) => (
+                  <div key={index} aria-hidden="true" className="space-y-1.5">
+                    <Skeleton className="h-3 w-20" />
+                    <Skeleton className="h-3 w-full" />
+                    <Skeleton className="h-3 w-2/3" />
+                  </div>
+                ))}
+              </div>
             )}
             {!loading && error && (
-              <div className="px-4 py-6 text-center">
-                <p className="text-xs text-red-700">{error}</p>
+              <div role="alert" className="px-4 py-6 text-center">
+                <p className="text-xs text-danger">{error}</p>
                 <button
                   type="button"
                   onClick={() => void load(true)}
-                  className="mt-2 text-xs font-medium text-brand-700 hover:underline"
+                  className="mt-2 rounded text-xs font-semibold text-brand-700 transition-colors duration-150 hover:text-brand-800 hover:underline"
                 >
                   Reintentar
                 </button>
               </div>
             )}
             {!loading && !error && items.length === 0 && (
-              <p className="px-4 py-6 text-center text-xs text-muted">
-                No tienes notificaciones todavía.
-              </p>
+              <div className="flex flex-col items-center gap-1.5 px-4 py-8 text-center">
+                <span className="grid h-9 w-9 place-items-center rounded-full bg-surface-2 text-muted">
+                  <Icon name="bell" className="h-4 w-4" />
+                </span>
+                <p className="text-xs font-medium text-ink">
+                  No tienes notificaciones todavía
+                </p>
+                <p className="text-[11px] leading-snug text-muted">
+                  Aquí llegarán los cambios de tus proyectos, dictámenes e
+                  invitaciones.
+                </p>
+              </div>
             )}
             {!loading && !error && items.length > 0 && (
               <ul className="divide-y divide-line">
@@ -249,7 +267,7 @@ export function NotificationBell() {
                         {!notification.readAt && (
                           <span
                             aria-label="Sin leer"
-                            className="ml-auto h-1.5 w-1.5 rounded-full bg-red-500"
+                            className="ml-auto h-1.5 w-1.5 rounded-full bg-danger"
                           />
                         )}
                       </span>
@@ -277,8 +295,8 @@ export function NotificationBell() {
                             void handleMarkRead(notification);
                             setOpen(false);
                           }}
-                          className={`block px-4 py-3 transition hover:bg-brand-50/60 ${
-                            notification.readAt ? 'opacity-80' : ''
+                          className={`block px-4 py-3 transition-colors duration-150 hover:bg-brand-50/60 ${
+                            notification.readAt ? 'opacity-70' : ''
                           }`}
                         >
                           {content}
@@ -287,8 +305,8 @@ export function NotificationBell() {
                         <button
                           type="button"
                           onClick={() => void handleMarkRead(notification)}
-                          className={`block w-full px-4 py-3 text-left transition hover:bg-brand-50/60 ${
-                            notification.readAt ? 'opacity-80' : ''
+                          className={`block w-full px-4 py-3 text-left transition-colors duration-150 hover:bg-brand-50/60 ${
+                            notification.readAt ? 'opacity-70' : ''
                           }`}
                         >
                           {content}

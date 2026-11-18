@@ -1,7 +1,12 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
+import { AuthCard, authLinkClass } from '@/components/auth/auth-shell';
+import { Alert } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/field';
 import { useToast } from '@/components/ui/toast-provider';
 import { authClient } from '@/lib/auth-client';
 import { mapAuthError } from '@/lib/auth-errors';
@@ -25,29 +30,40 @@ export function VerifyEmailForm({
   error: string | null;
 }) {
   const toast = useToast();
+  const router = useRouter();
   const [email, setEmail] = useState(initialEmail);
+  const [fieldError, setFieldError] = useState<string | undefined>();
+  const [formError, setFormError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [resent, setResent] = useState(false);
 
   async function handleResend(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!email.trim()) {
-      toast.error('Ingresa tu correo institucional.');
+    setFormError(null);
+    const value = email.trim();
+    if (!value) {
+      setFieldError('Ingresa tu correo institucional.');
+      document.getElementById('email')?.focus();
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+      setFieldError('Escribe un correo electrónico válido.');
+      document.getElementById('email')?.focus();
       return;
     }
     setLoading(true);
-    const { error } = await authClient.sendVerificationEmail({
-      email: email.trim(),
+    const { error: resendError } = await authClient.sendVerificationEmail({
+      email: value,
       callbackURL: `${window.location.origin}/verify-email`,
     });
     setLoading(false);
-    if (error) {
-      toast.error(
+    if (resendError) {
+      setFormError(
         mapAuthError(
-          error,
+          resendError,
           'No fue posible reenviar el correo de verificación. Intenta de nuevo.',
         ),
-        'No se pudo reenviar',
       );
       return;
     }
@@ -57,107 +73,108 @@ export function VerifyEmailForm({
     );
   }
 
+  function handleConfirm() {
+    if (!token) {
+      return;
+    }
+    setConfirming(true);
+    window.location.assign(verificationConfirmationHref(token));
+  }
+
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
-      <section className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
-        <h1 className="text-2xl font-semibold text-gray-900">
-          Verificación de correo
-        </h1>
-
-        {verified ? (
-          <div className="mt-4 space-y-4">
-            <p
-              role="status"
-              className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800"
-            >
-              Tu correo quedó verificado. Ya puedes iniciar sesión con tu
-              cuenta institucional.
-            </p>
-            <Link
-              href="/login"
-              className="block w-full rounded-md bg-blue-600 px-3 py-2 text-center text-sm font-medium text-white hover:bg-blue-700"
-            >
-              Ir a iniciar sesión
-            </Link>
-          </div>
-        ) : (
-          <>
-            {error && (
-              <p
-                role="alert"
-                className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
-              >
-                {error === 'TOKEN_EXPIRED'
-                  ? 'El enlace de verificación expiró. Solicita uno nuevo.'
-                  : 'El enlace de verificación no es válido. Solicita uno nuevo.'}
-              </p>
-            )}
-            {token ? (
-              <div className="mt-4 space-y-4">
-                <p className="text-sm text-gray-600">
-                  Confirma que este es tu correo institucional. Al verificar,
-                  podrás iniciar sesión en la plataforma.
-                </p>
-                <a
-                  href={verificationConfirmationHref(token)}
-                  className="block w-full rounded-md bg-blue-600 px-3 py-2 text-center text-sm font-medium text-white hover:bg-blue-700"
-                >
-                  Confirmar mi correo
-                </a>
-              </div>
-            ) : (
-              <p className="mt-4 text-sm text-gray-600">
-                Abre el enlace que enviamos a tu correo institucional. Si no lo
-                recibiste o expiró, solicita uno nuevo aquí abajo.
-              </p>
-            )}
-
-            <form
-              onSubmit={handleResend}
-              className="mt-6 space-y-3 border-t border-gray-200 pt-6"
-              noValidate
-            >
-              <label
-                htmlFor="email"
-                className="block text-sm font-medium text-gray-700"
-              >
-                Reenviar enlace de verificación
-              </label>
-              <input
-                id="email"
-                name="email"
-                type="email"
-                autoComplete="email"
-                required
-                placeholder="usuario@unipolidgo.edu.mx"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 placeholder:text-gray-400 focus:border-blue-600 focus:outline-none"
-              />
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-              >
-                {loading
-                  ? 'Enviando…'
-                  : resent
-                    ? 'Reenviar de nuevo'
-                    : 'Reenviar correo'}
-              </button>
-            </form>
-          </>
-        )}
-
-        <p className="mt-6 text-center text-sm text-gray-600">
-          <Link
-            href="/login"
-            className="font-medium text-blue-600 hover:underline"
-          >
+    <AuthCard
+      title="Verificación de correo"
+      description={
+        verified
+          ? undefined
+          : token
+            ? 'Confirma que este es tu correo institucional para activar tu cuenta.'
+            : 'Abre el enlace que enviamos a tu correo institucional. Si no lo recibiste o expiró, solicita uno nuevo.'
+      }
+      footer={
+        <p>
+          <Link href="/login" className={authLinkClass}>
             Volver a iniciar sesión
           </Link>
         </p>
-      </section>
-    </main>
+      }
+    >
+      {verified ? (
+        <div className="space-y-4">
+          <Alert tone="success" title="Correo verificado">
+            Ya puedes iniciar sesión con tu cuenta institucional.
+          </Alert>
+          <Button
+            fullWidth
+            onClick={() => {
+              router.push('/login');
+            }}
+          >
+            Ir a iniciar sesión
+          </Button>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {error && (
+            <Alert tone="danger" title="No pudimos verificar el enlace">
+              {error === 'TOKEN_EXPIRED'
+                ? 'El enlace de verificación expiró. Solicita uno nuevo abajo.'
+                : 'El enlace de verificación no es válido. Solicita uno nuevo abajo.'}
+            </Alert>
+          )}
+
+          {token && (
+            <Button fullWidth loading={confirming} onClick={handleConfirm}>
+              {confirming ? 'Verificando…' : 'Confirmar mi correo'}
+            </Button>
+          )}
+
+          <form
+            onSubmit={handleResend}
+            className={
+              token
+                ? 'space-y-3 border-t border-line pt-4'
+                : 'space-y-3'
+            }
+            noValidate
+          >
+            {token && (
+              <p className="text-[13px] font-medium text-ink">
+                Reenviar enlace de verificación
+              </p>
+            )}
+            <Input
+              id="email"
+              label="Correo institucional"
+              type="email"
+              autoComplete="email"
+              required
+              placeholder="usuario@unipolidgo.edu.mx"
+              value={email}
+              error={fieldError}
+              onChange={(event) => {
+                setEmail(event.target.value);
+                setFieldError(undefined);
+              }}
+            />
+
+            {formError && <Alert tone="danger">{formError}</Alert>}
+
+            <Button
+              type="submit"
+              fullWidth
+              variant={token ? 'secondary' : 'primary'}
+              loading={loading}
+            >
+              {loading
+                ? 'Enviando…'
+                : resent
+                  ? 'Reenviar de nuevo'
+                  : 'Reenviar correo'}
+            </Button>
+          </form>
+        </div>
+      )}
+    </AuthCard>
   );
 }

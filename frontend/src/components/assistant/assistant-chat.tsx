@@ -2,6 +2,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/dashboard/icons';
+import { useToast } from '@/components/ui/toast-provider';
+import { ConfirmDialog } from '@/components/ui/modal';
+import { ErrorState } from '@/components/ui/error-state';
+import { Drawer } from '@/components/ui/drawer';
+import { Button } from '@/components/ui/button';
 import { ROLE_LABELS, type DashboardUser } from '@/lib/dashboard';
 import {
   SUGGESTED_PROMPTS,
@@ -40,6 +45,7 @@ export function AssistantChat({
     renameConversation,
     deleteConversation,
   } = useAssistantHistory();
+  const toast = useToast();
 
   const [activeId, setActiveId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
@@ -53,6 +59,7 @@ export function AssistantChat({
     messageId: string;
     index: number;
   } | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -212,7 +219,17 @@ export function AssistantChat({
   }
 
   function handleDeleteConversation(conversationId: string) {
+    setPendingDeleteId(conversationId);
+  }
+
+  function confirmDeleteConversation() {
+    if (pendingDeleteId === null) {
+      return;
+    }
+    const conversationId = pendingDeleteId;
+    setPendingDeleteId(null);
     deleteConversation(conversationId);
+    toast.success('La conversación se eliminó de este dispositivo.', 'Conversación eliminada');
     if (conversationId === activeId) {
       abortRef.current?.abort();
       abortRef.current = null;
@@ -301,7 +318,7 @@ export function AssistantChat({
           </aside>
         )}
 
-        <section className="flex min-w-0 flex-1 flex-col bg-surface/40">
+        <section className="@container flex min-w-0 flex-1 flex-col bg-surface/40">
           <header className="flex items-center gap-3 border-b border-line bg-white px-3 py-2.5 lg:px-5">
             <button
               type="button"
@@ -337,7 +354,7 @@ export function AssistantChat({
 
             <AssistantAvatar className="h-9 w-9" iconClassName="h-[18px] w-[18px]" />
 
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <h1 className="truncate text-[14px] font-semibold tracking-tight text-ink">
                 Asistente Athenea
               </h1>
@@ -347,7 +364,7 @@ export function AssistantChat({
               </p>
             </div>
 
-            <div className="ml-auto flex items-center gap-1.5">
+            <div className="ml-auto flex shrink-0 items-center gap-1.5">
               {demoMode && (
                 <span
                   title="Las respuestas se generan localmente hasta que el backend RAG esté disponible."
@@ -357,11 +374,11 @@ export function AssistantChat({
                   <span className="hidden sm:inline">Modo </span>Demo
                 </span>
               )}
-              <span className="hidden items-center gap-1 rounded-full border border-brand-100 bg-brand-50 px-2.5 py-1 text-[9.5px] font-medium text-brand-800 md:inline-flex">
+              <span className="hidden items-center gap-1 rounded-full border border-brand-100 bg-brand-50 px-2.5 py-1 text-[9.5px] font-medium text-brand-800 @md:inline-flex">
                 <Icon name="shield" className="h-3 w-3" />
                 {roleLabel}
               </span>
-              <span className="hidden items-center gap-1 rounded-full border border-line bg-white px-2.5 py-1 text-[9.5px] font-medium text-muted lg:inline-flex">
+              <span className="hidden items-center gap-1 rounded-full border border-line bg-white px-2.5 py-1 text-[9.5px] font-medium text-muted @xl:inline-flex">
                 <Icon name="stamp" className="h-3 w-3" />
                 Solo lectura
               </span>
@@ -380,7 +397,7 @@ export function AssistantChat({
                     ? 'Colapsar fuentes consultadas'
                     : 'Mostrar fuentes consultadas'
                 }
-                className={`hidden items-center gap-1.5 rounded-full border px-2.5 py-1 text-[9.5px] font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 xl:inline-flex ${
+                className={`hidden items-center gap-1.5 rounded-full border px-2.5 py-1 text-[9.5px] font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 @2xl:inline-flex ${
                   sourcesOpen
                     ? 'border-brand-200 bg-brand-50 text-brand-800'
                     : 'border-line bg-white text-muted hover:border-brand-200 hover:bg-brand-50 hover:text-brand-800'
@@ -427,27 +444,22 @@ export function AssistantChat({
 
             {error && (
               <div className="mx-auto w-full max-w-3xl px-4 pb-6 lg:px-6">
-                <div
-                  role="alert"
-                  className="flex flex-wrap items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5"
-                >
-                  <Icon
-                    name="alert"
-                    className="mt-0.5 h-4 w-4 shrink-0 text-red-600"
-                  />
-                  <p className="min-w-0 flex-1 text-[11px] leading-relaxed text-red-800">
-                    {error}
-                  </p>
-                  {retryQuestion && (
-                    <button
-                      type="button"
-                      onClick={handleRetry}
-                      className="rounded-md border border-red-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-red-700 transition hover:bg-red-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-300"
-                    >
-                      Reintentar
-                    </button>
-                  )}
-                </div>
+                <ErrorState
+                  className="bg-white"
+                  title="No se pudo obtener una respuesta"
+                  description={error}
+                  action={
+                    retryQuestion ? (
+                      <Button
+                        size="sm"
+                        onClick={handleRetry}
+                        leadingIcon={<Icon name="refresh" className="h-3.5 w-3.5" />}
+                      >
+                        Reintentar
+                      </Button>
+                    ) : undefined
+                  }
+                />
               </div>
             )}
           </div>
@@ -497,43 +509,36 @@ export function AssistantChat({
         )}
       </div>
 
-      {historyOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden">
-          <button
-            type="button"
-            className="absolute inset-0 bg-ink/30 backdrop-blur-[1px]"
-            aria-label="Cerrar historial de conversaciones"
-            onClick={() => setHistoryOpen(false)}
-          />
-          <div className="absolute inset-y-0 left-0 flex w-72 flex-col bg-white shadow-xl">
-            <div className="flex items-center justify-between border-b border-line px-4 py-3">
-              <span className="text-sm font-semibold text-ink">
-                Conversaciones
-              </span>
-              <button
-                type="button"
-                onClick={() => setHistoryOpen(false)}
-                className="grid h-8 w-8 place-items-center rounded-md text-muted transition hover:bg-brand-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300"
-                aria-label="Cerrar historial"
-              >
-                <Icon name="close" className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="min-h-0 flex-1">
-              <HistorySidebar
-                conversations={conversations}
-                activeId={activeId}
-                searchQuery={searchQuery}
-                onNewChat={handleNewChat}
-                onSelect={handleSelectConversation}
-                onRename={renameConversation}
-                onDelete={handleDeleteConversation}
-                onNavigate={() => setHistoryOpen(false)}
-              />
-            </div>
-          </div>
-        </div>
-      )}
+      <Drawer
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        title="Conversaciones"
+        description="Historial de chats de este dispositivo"
+        side="left"
+      >
+        <HistorySidebar
+          conversations={conversations}
+          activeId={activeId}
+          searchQuery={searchQuery}
+          onNewChat={handleNewChat}
+          onSelect={handleSelectConversation}
+          onRename={renameConversation}
+          onDelete={handleDeleteConversation}
+          onNavigate={() => setHistoryOpen(false)}
+        />
+      </Drawer>
+
+      <ConfirmDialog
+        open={pendingDeleteId !== null}
+        onClose={() => setPendingDeleteId(null)}
+        onConfirm={() => void confirmDeleteConversation()}
+        title="Eliminar conversación"
+        description="Esta conversación se borrará de este navegador y no podrá recuperarse."
+        confirmLabel="Eliminar conversación"
+        cancelLabel="Cancelar"
+        tone="danger"
+        loading={false}
+      />
     </>
   );
 }
