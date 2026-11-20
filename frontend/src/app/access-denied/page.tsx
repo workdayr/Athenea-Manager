@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 
 /**
- * RF-001: pagina mostrada cuando un usuario autenticado intenta acceder
+ * Pagina mostrada cuando un usuario autenticado intenta acceder
  * a una operacion que su rol no permite (error FORBIDDEN del backend).
  *
  * El `errorLink` de Apollo redirige aqui. Tambien puede visitarse

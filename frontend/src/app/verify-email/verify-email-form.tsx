@@ -13,7 +13,7 @@ import { mapAuthError } from '@/lib/auth-errors';
 import { verificationConfirmationHref } from '@/lib/verify-email';
 
 /**
- * F1-06 / RF-010: confirma el correo con el token del enlace y permite
+ * Confirma el correo con el token del enlace y permite
  * reenviar la verificacion. La confirmacion es un enlace top-level (no un
  * fetch) porque BetterAuth responde con redireccion.
  */

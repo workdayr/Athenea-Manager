@@ -3,7 +3,7 @@ import { getApolloClient } from './apollo-client';
 import { ROLE_LABELS, type PlatformRole } from './dashboard';
 
 /**
- * F1-07 / RF-001: administracion de usuarios y roles de plataforma.
+ * Administracion de usuarios y roles de plataforma.
  * Solo el backend decide; este modulo transporta y presenta.
  */
 

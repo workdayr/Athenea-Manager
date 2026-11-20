@@ -101,8 +101,9 @@ documentos y paneles por rol.
 ## 2. No publicado
 
 Cambios posteriores a `0.9.0` (Fase 0 de saneamiento, 2026-11-12; Sprint 1
-de cierre de brechas, 2026-11-13; Sprints 2 a 5, 2026-11-14/15) y deudas
-conocidas detectadas al documentar el estado actual.
+de cierre de brechas, 2026-11-13; Sprints 2 a 5, 2026-11-14/15; Sprints 6/7,
+2026-11-16; US 3.2, 2026-11-18) y deudas conocidas detectadas al documentar
+el estado actual.
 
 ### Añadido — Sprint 1 (2026-11-13)
 
@@ -342,6 +343,39 @@ conocidas detectadas al documentar el estado actual.
   invitaciones, y alta, visibilidad, avance, reasignación, borrado y barrido
   diario BR-008 (retrasos y avisos idempotentes 30/15/5).
   La suite completa queda en **376 casos (53 archivos)**.
+
+### Añadido — US 3.2 Historial de versiones de propuesta (2026-11-18)
+
+- **Versionado de la propuesta (US 3.2).** `Proposal_Version` conserva hasta
+  5 versiones por proyecto, incluida la propuesta inicial (v1). El PI puede
+  subir una versión revisada solo cuando el último dictamen del comité es
+  `Revision_Required`; cada versión guarda el comentario del equipo, las
+  observaciones del comité, el dictamen que la resolvió, el revisor y la fecha
+  de decisión. Los documentos de la entrega quedan vinculados a su versión.
+- **API GraphQL.** Queries `proposalVersions(projectId)` y
+  `proposalVersionState(projectId)`; la segunda expone límite, versiones
+  usadas/restantes, siguiente número y motivo de bloqueo, para que la UI no
+  replique reglas. La subida sigue por REST
+  `POST /api/projects/:projectId/proposal-versions` con escaneo antivirus,
+  validación de PDF/cuota y compensación de archivos si falla la transacción.
+- **Integración con el dictamen.** `submitProjectDecision` vincula la
+  evaluación a la versión vigente dentro de la misma transacción. La
+  transición `Draft -> Proposed` crea la versión 1 y vincula los documentos
+  iniciales; una migración idempotente hace el backfill de los proyectos ya
+  enviados.
+- **Frontend.** El expediente muestra el contador de versiones, el botón de
+  subida con su motivo de bloqueo, carga de múltiples PDF con tipo documental,
+  descarga de cada entrega y los comentarios/dictamen de cada versión. La
+  pestaña Historial del proyecto combina versiones y transiciones de estado en
+  una línea de tiempo cronológica.
+- **Limpieza del frontend.** Se retiraron las referencias a identificadores de
+  requisitos de los comentarios y textos visibles.
+- **Migración** `20261118000000_us3_2_version_history` (idempotente), aplicada
+  en la base de desarrollo.
+- **Pruebas.** Nuevas specs de política, servicio, sincronización del dictamen
+  e integración real contra PostgreSQL (subida de v2, orden del historial,
+  cupo restante, límite de 5 y acceso denegado a ajenos). La suite completa
+  queda en **401 casos (55 archivos)**.
 
 ### Corregido — flujo de convocatoria (2026-11-16)
 

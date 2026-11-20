@@ -2,7 +2,7 @@ import { gql } from '@apollo/client';
 import { getApolloClient } from './apollo-client';
 
 /**
- * F1-09 / RF-018: convocatorias institucionales.
+ * Convocatorias institucionales.
  *
  * El backend expone `calls` (historial completo) y `call`; la postulacion
  * reutiliza `registerProject(callId)` para conservar el cierre por cupo y

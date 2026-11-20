@@ -35,7 +35,7 @@ const TIMESTAMP_FORMAT = new Intl.DateTimeFormat('es-MX', {
   timeStyle: 'short',
 });
 
-/** RF-020: expedientes archivados, alertas y reintento manual. */
+/** Expedientes archivados, alertas y reintento manual. */
 export default function AdminArchivePage() {
   return (
     <AuthedShell

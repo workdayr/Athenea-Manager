@@ -37,7 +37,7 @@ const TIMESTAMP_FORMAT = new Intl.DateTimeFormat('es-MX', {
 });
 
 /**
- * F1-08 / RF-017: consulta filtrada de la bitácora inmutable.
+ * Consulta filtrada de la bitácora inmutable.
  * Solo lectura: la pantalla no ofrece acciones sobre los registros.
  */
 export default function AdminAuditPage() {

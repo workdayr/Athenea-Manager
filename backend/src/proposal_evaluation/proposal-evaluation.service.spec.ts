@@ -34,6 +34,7 @@ const { state, prismaMock } = vi.hoisted(() => {
     audits: Record<string, unknown>[];
     notifications: Record<string, unknown>[];
     emails: Record<string, unknown>[];
+    proposalVersions: Record<string, unknown>[];
     nextConflictId: number;
     nextEvaluationId: number;
     nextNotificationId: number;
@@ -45,6 +46,7 @@ const { state, prismaMock } = vi.hoisted(() => {
     audits: [],
     notifications: [],
     emails: [],
+    proposalVersions: [],
     nextConflictId: 1,
     nextEvaluationId: 1,
     nextNotificationId: 1,
@@ -133,6 +135,23 @@ const { state, prismaMock } = vi.hoisted(() => {
     // F1-10: el dictamen pendiente entra en la misma transaccion.
     decision_Report: {
       create: async () => ({ report_id: state.nextEvaluationId }),
+    },
+    // US 3.2: el dictamen resuelve la version vigente del historial.
+    proposal_Version: {
+      findFirst: async () => state.proposalVersions[0] ?? null,
+      update: async (args: {
+        where: { version_id: number };
+        data: Record<string, unknown>;
+      }) => {
+        const row = state.proposalVersions.find(
+          (version) => version['version_id'] === args.where.version_id,
+        );
+        if (row) {
+          Object.assign(row, args.data);
+          return row;
+        }
+        return { version_id: args.where.version_id, ...args.data };
+      },
     },
   };
 
@@ -360,6 +379,7 @@ describe('submitProjectDecision (RF-019, RF-003)', () => {
     state.audits = [];
     state.notifications = [];
     state.emails = [];
+    state.proposalVersions = [];
     state.nextNotificationId = 1;
     seedProject();
   });
@@ -431,6 +451,26 @@ describe('submitProjectDecision (RF-019, RF-003)', () => {
     })) as { newStatus: string };
     expect(result.newStatus).toBe('Under_Review');
     expect(state.projects[0]?.status).toBe('Under_Review');
+  });
+
+  it('vincula el dictamen a la version vigente del historial', async () => {
+    state.proposalVersions = [
+      { version_id: 3, version_number: 2, status: 'Under_Review' },
+    ];
+    const clean = { ...viewer, id: 'rev-9', name: 'Pedro Jimenez Ruiz' };
+    await submitProjectDecision(clean, {
+      projectId: 1,
+      decision: 'Approved',
+      justification,
+    });
+    expect(state.proposalVersions[0]).toMatchObject({
+      version_id: 3,
+      status: 'Approved',
+      reviewer_id: 'rev-9',
+      evaluation_id: state.evaluations[0]?.['evaluation_id'],
+      committee_comments: justification,
+    });
+    expect(state.proposalVersions[0]?.['decided_at']).toBeInstanceOf(Date);
   });
 
   it('con conflicto Cleared permite evaluar', async () => {

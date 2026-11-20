@@ -8,7 +8,7 @@ import {
 } from './assistant';
 
 /**
- * Historial local del asistente (RF-010 / UC-010).
+ * Historial local del asistente.
  *
  * El backend aun no expone conversaciones, asi que se guardan en el
  * navegador con una clave versionada. La forma del dato coincide con el

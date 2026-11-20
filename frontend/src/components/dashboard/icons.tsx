@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 
 /**
- * Set de iconos de linea del dashboard (US Dashboard / RF-008).
+ * Set de iconos de linea del dashboard.
  * Se declaran a mano para no agregar una dependencia de iconos solo por
  * la navegacion del panel; el trazo sigue el estilo del diseno
  * (24x24, stroke 1.6, esquinas redondeadas).

@@ -21,9 +21,9 @@ import {
 const ALLOWED_ROLES = ['COMMITTEE', 'COORDINATOR'];
 
 /**
- * UC-003 paso 1: lista de propuestas en Proposed/Under_Review para el
- * Comité de Evaluación (RF-019). Las filas con conflicto muestran la
- * alerta BR-011 y enlazan al detalle (lectura, sin formulario).
+ * Paso 1: lista de propuestas en Proposed/Under_Review para el
+ * Comité de Evaluación. Las filas con conflicto muestran la
+ * alerta y enlazan al detalle (lectura, sin formulario).
  */
 export default function ProposalEvaluationListPage() {
   return (

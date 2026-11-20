@@ -43,7 +43,7 @@ function relativeDate(value: string): string {
 }
 
 /**
- * RF-014: campana de notificaciones in-app.
+ * Campana de notificaciones in-app.
  *
  * Sigue el patron actual del frontend (`getApolloClient()` por operacion,
  * sin ApolloProvider) y refresca el contador cada 30 s. El panel lista las

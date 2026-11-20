@@ -53,8 +53,8 @@ interface Errors {
 
 /**
  * US 2.1 - Registro de Nueva Propuesta (Paso 1 + Paso 3 del Figma).
- * F1-11: declara las banderas de investigación sensible (BR-006) y la
- * confidencialidad del proyecto (BR-007).
+ * Declara las banderas de investigación sensible y la
+ * confidencialidad del proyecto.
  */
 export default function NewProjectPage() {
   return (
@@ -76,7 +76,7 @@ function NewProjectContent({ user }: { user: DashboardUser }) {
   const [countError, setCountError] = useState(false);
   const [countReloadKey, setCountReloadKey] = useState(0);
 
-  // F1-09 / RF-018: postulación desde /calls/[callId]?callId=N. Se resuelve en
+  // Postulación desde /calls/[callId]?callId=N. Se resuelve en
   // el primer render del cliente; la pantalla no se renderiza en servidor
   // porque espera a la sesión.
   const [callId] = useState<number | null>(() => {

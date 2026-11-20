@@ -1,7 +1,7 @@
 import { gql } from '@apollo/client';
 import { getApolloClient } from './apollo-client';
 
-/** F2-02 / RF-011: equipo del proyecto e invitaciones (BR-010). */
+/** Equipo del proyecto e invitaciones. */
 
 export type ProjectTeamRole =
   | 'Principal_Investigator'

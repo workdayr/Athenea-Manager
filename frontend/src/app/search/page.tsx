@@ -138,7 +138,7 @@ function SearchContent() {
 
       <PageHeader
         title="Búsqueda institucional"
-        description="Resultados de proyectos, convocatorias y usuarios con los permisos de tu rol (RF-012)."
+        description="Resultados de proyectos, convocatorias y usuarios con los permisos de tu rol."
       />
 
       <form onSubmit={applyQuery} className="flex flex-wrap items-end gap-3">

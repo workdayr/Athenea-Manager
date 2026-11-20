@@ -1,5 +1,5 @@
 /**
- * Operaciones de subida de documentos de evidencia (RF-016, RNF-005).
+ * Operaciones de subida de documentos de evidencia.
  * Reutilizan el transporte same-origin `/api/*` (ver next.config.ts) y
  * el token Bearer de `localStorage['bearer_token']`.
  *

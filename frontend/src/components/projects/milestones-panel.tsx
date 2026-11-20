@@ -25,8 +25,8 @@ function dateInput(value: string): string {
 }
 
 /**
- * F2-07 / RF-006: CRUD y seguimiento de hitos.
- * El backend aplica BR-008 (retrasos y avisos) y bloquea la escritura en
+ * CRUD y seguimiento de hitos.
+ * El backend aplica las reglas de retrasos y avisos y bloquea la escritura en
  * proyectos archivados.
  */
 export function MilestonesPanel({

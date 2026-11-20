@@ -3,9 +3,9 @@ import { getApolloClient } from './apollo-client';
 import { getStoredToken } from './auth-client';
 
 /**
- * Operaciones GraphQL del modulo proposal_evaluation (RF-019, BR-011).
+ * Operaciones GraphQL del modulo proposal_evaluation.
  * Reutilizan `getApolloClient()` y `graphqlErrorCode()` de apollo-client
- * (mismo transporte `/api/graphql` + errorLink RF-001).
+ * (mismo transporte `/api/graphql` + errorLink).
  */
 
 export const PROPOSALS_PENDING_REVIEW_QUERY = gql`
@@ -75,7 +75,7 @@ export const SUBMIT_PROJECT_DECISION_MUTATION = gql`
 `;
 
 /* -------------------------------------------------------------------------- */
-/* F1-10 / RF-019: dictamen PDF asincrono                                      */
+/* dictamen PDF asincrono */
 /* -------------------------------------------------------------------------- */
 
 export type DecisionReportStatus = 'Pending' | 'Ready' | 'Failed';
@@ -249,15 +249,15 @@ export function blockReasonMessage(
     const surnames =
       matchedSurnames.length > 0 ? matchedSurnames.join(', ') : 'registrados';
     return (
-      `Conflicto de interés familiar (BR-011): apellidos coincidentes: ${surnames}. ` +
+      `Conflicto de interés familiar: apellidos coincidentes: ${surnames}. ` +
       'La evaluación está bloqueada hasta la revisión manual del Administrador.'
     );
   }
   if (blockReason === 'SELF_REVIEW') {
-    return 'No puedes evaluar un proyecto de tu propio equipo (BR-004).';
+    return 'No puedes evaluar un proyecto de tu propio equipo.';
   }
   if (blockReason === 'DEPARTMENT_CONFLICT') {
-    return 'No puedes evaluar un proyecto del mismo departamento que el Investigador Principal (BR-004).';
+    return 'No puedes evaluar un proyecto del mismo departamento que el Investigador Principal.';
   }
   if (blockReason === 'INVALID_STATE') {
     return 'El proyecto ya no admite decisión en su estado actual.';

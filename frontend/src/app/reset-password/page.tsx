@@ -1,7 +1,7 @@
 import { ResetPasswordForm } from './reset-password-form';
 
 /**
- * F1-06 / RF-010: la pagina lee el token del enlace del correo en el
+ * La pagina lee el token del enlace del correo en el
  * servidor y lo pasa al formulario. Asi no hay hydration mismatch ni
  * `useSearchParams` en un componente cliente.
  */

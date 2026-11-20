@@ -24,9 +24,9 @@ import {
 import type { DashboardUser } from '@/lib/dashboard';
 
 /**
- * F1-09 / RF-018: detalle de la convocatoria y punto de postulación.
- * La postulación reutiliza el registro de propuestas (5 PDFs, cuota y
- * BR-002) pasando `callId`; los errores CALL_FULL / CALL_CLOSED se
+ * Detalle de la convocatoria y punto de postulación.
+ * La postulación reutiliza el registro de propuestas (5 PDFs y cuota)
+ * pasando `callId`; los errores CALL_FULL / CALL_CLOSED se
  * muestran ahí al confirmar.
  */
 export default function CallDetailPage() {

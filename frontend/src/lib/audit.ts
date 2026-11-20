@@ -1,7 +1,7 @@
 import { gql } from '@apollo/client';
 import { getApolloClient } from './apollo-client';
 
-/** F1-08 / RF-017: bitacora de auditoria institucional. */
+/** Bitacora de auditoria institucional. */
 
 export interface AuditLogEntry {
   logId: number;

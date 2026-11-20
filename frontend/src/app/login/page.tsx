@@ -1,7 +1,7 @@
 import { LoginForm } from './login-form';
 
 /**
- * Pagina de login (RF-010, RF-015). Server Component: lee `?error=` del
+ * Pagina de login. Server Component: lee `?error=` del
  * callback OAuth en el servidor y lo pasa por props al formulario.
  * Asi el HTML del servidor y el primer render del cliente son identicos
  * (sin hydration mismatch), a diferencia de leer window.location en el

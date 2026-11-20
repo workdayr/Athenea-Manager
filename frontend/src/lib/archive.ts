@@ -1,7 +1,7 @@
 import { gql } from '@apollo/client';
 import { getApolloClient } from './apollo-client';
 
-/** RF-020: consulta y reintento manual del archivado institucional. */
+/** Consulta y reintento manual del archivado institucional. */
 
 export interface ArchivedProject {
   projectId: number;

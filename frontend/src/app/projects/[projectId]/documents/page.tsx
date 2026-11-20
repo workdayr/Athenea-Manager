@@ -26,13 +26,20 @@ import {
 } from '@/lib/document-upload';
 import {
   fetchProjectProducts,
+  fetchProposalVersionState,
   fetchProposalVersions,
+  proposalDocTypeLabel,
+  proposalDocTypeValue,
+  proposalVersionBlockedMessage,
   registerResearchOutput,
   uploadProposalVersion,
+  PROPOSAL_DOCUMENT_TYPES,
   PRODUCT_TYPE_LABELS,
+  VERSION_DECISION_LABELS,
   type ProductType,
-  type ResearchProduct,
   type ProposalVersion,
+  type ProposalVersionState,
+  type ResearchProduct,
 } from '@/lib/products-and-versions';
 import {
   certifyProjectAnonymization,
@@ -51,6 +58,7 @@ import {
   type DocumentReviewStatus,
   type DocumentVisibility,
   type ProjectDocument,
+  type ProjectDocumentType,
   type ProjectEthicsInfo,
 } from '@/lib/documents';
 
@@ -69,21 +77,14 @@ const REVIEW_TONES: Record<DocumentReviewStatus, BadgeTone> = {
   Rejected: 'danger',
 };
 
-const VERSION_STATUS_LABELS: Record<string, string> = {
-  Submitted: 'Enviada al comité',
-  Under_Review: 'En revisión',
-  Approved: 'Aprobada',
-  Rejected: 'Rechazada',
-};
-
 /**
- * US 4.1 / RF-005: expediente documental del proyecto.
+ * Expediente documental del proyecto.
  *
  * - Lista los documentos que el backend autoriza para el rol actual
  *   (la administración solo recibe los compartidos).
  * - El PI puede cambiar la visibilidad de cada documento, salvo los de
  *   revisión obligatoria y los proyectos ya cerrados.
- * - RF-016 / RNF-005: la evidencia se sube por REST y nace como "Solo
+ * -: la evidencia se sube por REST y nace como "Solo
  *   equipo"; el PI puede compartirla después.
  */
 export default function ProjectDocumentsPage() {
@@ -119,7 +120,7 @@ function DocumentsContent({ user }: { user: DashboardUser }) {
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
   const [certifying, setCertifying] = useState(false);
 
-  // AIR-003: cuando se llega desde una cita del asistente, el enlace incluye
+  // Cuando se llega desde una cita del asistente, el enlace incluye
   // #document-<id>; se resalta la fila correspondiente.
   const [highlightedDocumentId] = useState<number | null>(() => {
     if (typeof window === 'undefined') {
@@ -136,7 +137,12 @@ function DocumentsContent({ user }: { user: DashboardUser }) {
   const [uploading, setUploading] = useState(false);
 
   const [versionOpen, setVersionOpen] = useState(false);
-  const [newVersionFile, setNewVersionFile] = useState<File | null>(null);
+  const [versionState, setVersionState] = useState<ProposalVersionState | null>(
+    null,
+  );
+  const [versionRows, setVersionRows] = useState<
+    Array<{ file: File | null; docType: ProjectDocumentType }>
+  >([{ file: null, docType: 'METHODOLOGY' }]);
   const [newVersionComment, setNewVersionComment] = useState('');
   const [versionError, setVersionError] = useState<string | null>(null);
   const [uploadingVersion, setUploadingVersion] = useState(false);
@@ -206,6 +212,18 @@ function DocumentsContent({ user }: { user: DashboardUser }) {
       .catch(() => {
         if (active) {
           setVersions([]);
+        }
+      });
+
+    fetchProposalVersionState(projectId)
+      .then((state) => {
+        if (active) {
+          setVersionState(state);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setVersionState(null);
         }
       });
 
@@ -384,26 +402,47 @@ function DocumentsContent({ user }: { user: DashboardUser }) {
 
   function handleUploadVersion(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!newVersionFile) {
-      setVersionError('Adjunta el PDF con la versión revisada.');
+    const selected = versionRows.filter(
+      (row): row is { file: File; docType: ProjectDocumentType } =>
+        row.file !== null,
+    );
+    if (selected.length === 0) {
+      setVersionError('Adjunta al menos un PDF con la versión revisada.');
+      return;
+    }
+    const oversized = selected.find((row) => row.file.size > MAX_FILE_BYTES);
+    if (oversized) {
+      setVersionError(
+        `"${oversized.file.name}" supera el máximo de 25 MB por archivo.`,
+      );
       return;
     }
     void (async () => {
       setUploadingVersion(true);
       try {
-        await uploadProposalVersion(projectId, newVersionComment, [
-          { file: newVersionFile, docType: 'methodology' },
-        ]);
+        await uploadProposalVersion(
+          projectId,
+          newVersionComment,
+          selected.map((row) => ({
+            file: row.file,
+            docType: proposalDocTypeValue(row.docType),
+          })),
+        );
         toast.success(
-          'El comité recibirá la nueva versión para revisión.',
+          `La versión ${versionState ? versionState.nextVersionNumber : 'revisada'} quedó registrada en el historial. El comité recibirá el aviso para revisarla.`,
           'Versión enviada',
         );
-        setNewVersionFile(null);
+        setVersionRows([{ file: null, docType: 'METHODOLOGY' }]);
         setNewVersionComment('');
         setVersionError(null);
         setVersionOpen(false);
         await loadDocuments();
-        setVersions(await fetchProposalVersions(projectId));
+        const [rows, state] = await Promise.all([
+          fetchProposalVersions(projectId),
+          fetchProposalVersionState(projectId),
+        ]);
+        setVersions(rows);
+        setVersionState(state);
       } catch (error: unknown) {
         setVersionError(
           error instanceof Error
@@ -714,18 +753,42 @@ function DocumentsContent({ user }: { user: DashboardUser }) {
             </h2>
             <p className="mt-0.5 text-xs text-muted">
               Entregas revisadas del protocolo tras un dictamen que pide
-              correcciones.
+              correcciones. Se conservan hasta 5 versiones por proyecto.
             </p>
+            {versionState && (
+              <p className="mt-1 text-[11px] font-medium text-muted">
+                {Math.min(versions?.length ?? 0, versionState.maxVersions)} de{' '}
+                {versionState.maxVersions} versiones registradas
+                {versionState.canUpload
+                  ? ` · la siguiente será la versión ${versionState.nextVersionNumber}`
+                  : ''}
+              </p>
+            )}
           </div>
-          {isPrincipalInvestigator && (
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => setVersionOpen(true)}
-              leadingIcon={<Icon name="arrowUpRight" className="h-3.5 w-3.5" />}
-            >
-              Subir versión revisada
-            </Button>
+          {isPrincipalInvestigator &&
+            versionState &&
+            versionState.blockedReason !== 'NOT_PRINCIPAL_INVESTIGATOR' && (
+            <div className="flex flex-col items-end gap-1.5">
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => setVersionOpen(true)}
+                disabled={!versionState?.canUpload}
+                title={
+                  proposalVersionBlockedMessage(
+                    versionState?.blockedReason ?? null,
+                  ) ?? undefined
+                }
+                leadingIcon={<Icon name="arrowUpRight" className="h-3.5 w-3.5" />}
+              >
+                Subir versión revisada
+              </Button>
+              {versionState && !versionState.canUpload && (
+                <p className="max-w-[240px] text-right text-[11px] leading-snug text-muted">
+                  {proposalVersionBlockedMessage(versionState.blockedReason)}
+                </p>
+              )}
+            </div>
           )}
         </header>
 
@@ -761,20 +824,39 @@ function DocumentsContent({ user }: { user: DashboardUser }) {
                   </span>
                   <Badge
                     tone={
-                      version.status === 'Approved'
+                      (version.decision ?? version.status) === 'Approved'
                         ? 'success'
-                        : version.status === 'Rejected'
+                        : (version.decision ?? version.status) === 'Rejected'
                           ? 'danger'
-                          : 'info'
+                          : (version.decision ?? version.status) ===
+                              'Revision_Required'
+                            ? 'warning'
+                            : 'info'
                     }
                   >
-                    {VERSION_STATUS_LABELS[version.status] ?? version.status}
+                    {VERSION_DECISION_LABELS[version.decision ?? version.status] ??
+                      version.decision ??
+                      version.status}
                   </Badge>
                   <span className="ml-auto text-[11px] text-muted">
-                    {formatDate(version.submittedAt)}
+                    Enviada el {formatDate(version.submittedAt)}
                     {version.submitterName ? ` · ${version.submitterName}` : ''}
                   </span>
                 </div>
+
+                {version.decidedAt && (
+                  <p className="mt-1 text-[11px] text-muted">
+                    Dictamen del {formatDate(version.decidedAt)}
+                    {version.reviewerName ? ` · ${version.reviewerName}` : ''}
+                  </p>
+                )}
+
+                {version.submitterComment && (
+                  <p className="mt-2 rounded-lg border border-line bg-white px-3 py-2 text-[12px] leading-relaxed text-ink">
+                    <span className="font-semibold">Comentario del equipo: </span>
+                    {version.submitterComment}
+                  </p>
+                )}
 
                 {version.committeeComments && (
                   <p className="mt-2 rounded-lg border border-line bg-surface-2 px-3 py-2 text-[12px] leading-relaxed text-ink">
@@ -786,12 +868,21 @@ function DocumentsContent({ user }: { user: DashboardUser }) {
                 {version.documents.length > 0 && (
                   <ul className="mt-2 flex flex-wrap gap-1.5">
                     {version.documents.map((document) => (
-                      <li
-                        key={document.documentId}
-                        className="inline-flex items-center gap-1 rounded-md border border-line bg-white px-2 py-1 text-[11px] text-muted"
-                      >
-                        <Icon name="doc" className="h-3 w-3" />
-                        {document.fileName ?? `Documento #${document.documentId}`}
+                      <li key={document.documentId}>
+                        <button
+                          type="button"
+                          onClick={() => void handleDownload(document.documentId)}
+                          disabled={downloadingId === document.documentId}
+                          aria-label={`Descargar ${document.fileName ?? 'documento'} de la versión ${version.versionNumber}`}
+                          className="inline-flex items-center gap-1 rounded-md border border-line bg-white px-2 py-1 text-[11px] text-muted transition-colors duration-150 hover:border-brand-300 hover:text-brand-700 disabled:cursor-wait disabled:opacity-60"
+                        >
+                          {downloadingId === document.documentId ? (
+                            <Spinner className="h-3 w-3" />
+                          ) : (
+                            <Icon name="doc" className="h-3 w-3" />
+                          )}
+                          {document.fileName ?? `Documento #${document.documentId}`}
+                        </button>
                       </li>
                     ))}
                   </ul>
@@ -994,7 +1085,7 @@ function DocumentsContent({ user }: { user: DashboardUser }) {
           setVersionError(null);
         }}
         title="Subir versión revisada"
-        description="Disponible cuando el comité solicitó correcciones. La versión anterior queda intacta en el historial."
+        description="Disponible cuando el comité solicitó correcciones. La versión anterior queda intacta en el historial y el proyecto admite hasta 5 versiones."
         footer={
           <>
             <Button
@@ -1023,51 +1114,115 @@ function DocumentsContent({ user }: { user: DashboardUser }) {
           className="space-y-4"
           noValidate
         >
-          <div>
-            <label
-              htmlFor="version-file"
-              className="mb-1.5 block text-[13px] font-medium text-ink"
-            >
-              Protocolo revisado (PDF)
-              <span className="ml-1 text-danger" aria-hidden="true">*</span>
-            </label>
-            <input
-              id="version-file"
-              type="file"
-              accept=".pdf,application/pdf"
-              onChange={(event) => {
-                setNewVersionFile(event.target.files?.[0] ?? null);
-                setVersionError(null);
-              }}
-              aria-invalid={versionError ? true : undefined}
-              aria-describedby={
-                versionError ? 'version-file-error' : undefined
-              }
-              className="block w-full rounded-lg border border-line-strong bg-white text-[12px] text-muted file:mr-3 file:border-0 file:border-r file:border-line file:bg-surface-2 file:px-3 file:py-2.5 file:text-[12px] file:font-medium file:text-ink hover:file:bg-brand-50"
-            />
-            {newVersionFile && (
-              <p className="mt-1.5 text-xs text-muted">
-                {newVersionFile.name} · {formatFileSize(newVersionFile.size)}
+          {versionError && (
+            <Alert tone="danger" title="No se pudo enviar la versión">
+              {versionError}
+            </Alert>
+          )}
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[13px] font-medium text-ink">
+                Documentos de la versión
+                <span className="ml-1 text-danger" aria-hidden="true">*</span>
               </p>
-            )}
-            {versionError && (
-              <p
-                id="version-file-error"
-                role="alert"
-                className="mt-1.5 text-xs font-medium text-danger"
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={() =>
+                  setVersionRows((current) => [
+                    ...current,
+                    { file: null, docType: 'METHODOLOGY' },
+                  ])
+                }
+                disabled={versionRows.length >= PROPOSAL_DOCUMENT_TYPES.length}
               >
-                {versionError}
-              </p>
-            )}
+                Añadir documento
+              </Button>
+            </div>
+
+            {versionRows.map((row, index) => (
+              <div
+                key={index}
+                className="space-y-2 rounded-lg border border-line bg-surface-2 p-3"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                    Documento {index + 1}
+                  </span>
+                  {versionRows.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setVersionRows((current) =>
+                          current.filter((_, position) => position !== index),
+                        )
+                      }
+                      className="rounded text-[11px] font-medium text-muted transition-colors duration-150 hover:text-danger"
+                    >
+                      Quitar
+                    </button>
+                  )}
+                </div>
+
+                <Select
+                  id={`version-doc-type-${index}`}
+                  label="Tipo documental"
+                  value={row.docType}
+                  onChange={(event) => {
+                    const docType = event.target.value as ProjectDocumentType;
+                    setVersionRows((current) =>
+                      current.map((item, position) =>
+                        position === index ? { ...item, docType } : item,
+                      ),
+                    );
+                  }}
+                >
+                  {PROPOSAL_DOCUMENT_TYPES.map((docType) => (
+                    <option key={docType} value={docType}>
+                      {proposalDocTypeLabel(docType)}
+                    </option>
+                  ))}
+                </Select>
+
+                <input
+                  id={`version-file-${index}`}
+                  type="file"
+                  accept=".pdf,application/pdf"
+                  aria-label={`Archivo PDF del documento ${index + 1}`}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0] ?? null;
+                    setVersionError(null);
+                    setVersionRows((current) =>
+                      current.map((item, position) =>
+                        position === index ? { ...item, file } : item,
+                      ),
+                    );
+                  }}
+                  className="block w-full rounded-lg border border-line-strong bg-white text-[12px] text-muted file:mr-3 file:border-0 file:border-r file:border-line file:bg-surface-2 file:px-3 file:py-2.5 file:text-[12px] file:font-medium file:text-ink hover:file:bg-brand-50"
+                />
+                {row.file && (
+                  <p className="text-xs text-muted">
+                    {row.file.name} · {formatFileSize(row.file.size)}
+                  </p>
+                )}
+              </div>
+            ))}
+
+            <p className="text-[11px] leading-relaxed text-muted">
+              Solo PDF, hasta 25 MB por archivo. Cada entrega queda inmutable en
+              el historial.
+            </p>
           </div>
 
           <Textarea
             id="version-comment"
             label="Comentario para el comité"
             rows={3}
-            maxLength={2000}
+            maxLength={4000}
             value={newVersionComment}
-            hint="Resume los cambios atendidos respecto al dictamen anterior."
+            hint="Resume los cambios atendidos respecto al dictamen anterior (máximo 4000 caracteres)."
             onChange={(event) => setNewVersionComment(event.target.value)}
             placeholder="Se ajustó la metodología y se amplió la muestra…"
           />

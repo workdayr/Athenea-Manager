@@ -104,13 +104,13 @@ function pageWindow(current: number, total: number): (number | 'gap')[] {
 }
 
 /**
- * Tablero de Control Institucional (UC-009 / RF-008).
+ * Tablero de Control Institucional.
  *
- * RF-001: los KPI, la tabla y el detalle presupuestal se filtran por rol.
+ * Los KPI, la tabla y el detalle presupuestal se filtran por rol.
  * El Comité solo ve propuestas en dictamen y no accede a cifras de
  * presupuesto; coordinación y administración ven el inventario completo.
  *
- * RF-008 / RNF-002: los datos provienen de `coordinatorDashboard`, que
+ * Los datos provienen de `coordinatorDashboard`, que
  * pagina del lado del servidor y cachea los cálculos durante 15 minutos.
  */
 export function AdminDashboard({
@@ -137,7 +137,7 @@ export function AdminDashboard({
     user.role === 'ADMINISTRATOR' || user.role === 'COORDINATOR';
 
   useEffect(() => {
-    // RF-008: evita una consulta por cada tecla; el debounce solo aplica a
+    // Evita una consulta por cada tecla; el debounce solo aplica a
     // la busqueda de la tabla, no a los KPI (que ignoran ese filtro).
     const timer = setTimeout(() => {
       setSearch(query.trim());
@@ -253,7 +253,8 @@ export function AdminDashboard({
     setPage(1);
   }
 
-  async function handleExport(format: 'csv' | 'pdf') {    // F2-05 / RF-008: el servidor genera el archivo con TODOS los registros
+  async function handleExport(format: 'csv' | 'pdf') {
+    // El servidor genera el archivo con TODOS los registros
     // que cumplen los filtros (no solo la pagina visible) y aplica la
     // visibilidad por rol, incluido el presupuesto oculto al Comité.
     setExporting(format);
@@ -338,7 +339,7 @@ export function AdminDashboard({
                 loading={exporting === 'csv'}
                 disabled={rows.length === 0 || exporting !== null}
                 leadingIcon={<Icon name="download" className="h-4 w-4" />}
-                title="Exporta todos los proyectos que cumplen los filtros en CSV (RF-008)"
+                title="Exporta todos los proyectos que cumplen los filtros en CSV"
               >
                 {exporting === 'csv' ? 'Exportando…' : 'Informe CSV'}
               </Button>
@@ -505,7 +506,7 @@ export function AdminDashboard({
           ) : (
             <div className="mt-5 rounded-lg border border-line bg-surface-2 px-3 py-2.5 text-[10.5px] text-muted">
               Vista de Comité: las cifras presupuestales están restringidas por
-              rol (RF-001).
+              rol.
             </div>
           )}
         </section>
@@ -516,7 +517,7 @@ export function AdminDashboard({
               Embudo del Ciclo de Vida
             </h2>
             <span className="shrink-0 text-[10px] font-medium text-muted">
-              RF-002 a RF-007
+              Todas las etapas
             </span>
           </div>
           <p className="mt-1 text-[11.5px] text-muted">
@@ -548,7 +549,7 @@ export function AdminDashboard({
             </h2>
             <p className="mt-1 text-[11.5px] text-muted">
               Inventario dinámico y estado de cumplimiento de compromisos
-              pactados (SLA / RF-006)
+              pactados (SLA)
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -754,7 +755,7 @@ export function AdminDashboard({
             · UNIPOLI Vicerrectoría
             <br />
             Cifrado AES-256-GCM en reposo · Tokens de sesión con caducidad
-            forzosa · Auditoría inmutable activa (RF-017)
+            forzosa · Auditoría inmutable activa
           </p>
         </div>
         <div className="flex items-center gap-3 text-[10px] text-muted">
@@ -818,7 +819,7 @@ function ProjectRow({ project }: { project: PriorityProject }) {
         </p>
         <p className="mt-1 text-[10px] text-muted">
           {isLate
-            ? `Expiró hace ${project.daysLate ?? 0} días (RF-006)`
+            ? `Expiró hace ${project.daysLate ?? 0} días`
             : project.sla === 'no_milestones'
               ? `Fin del proyecto: ${formatDate(project.dueDate)}`
               : `Vence: ${formatDate(project.dueDate)}`}

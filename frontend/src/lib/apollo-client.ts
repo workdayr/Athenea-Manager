@@ -9,7 +9,7 @@ import { onError } from '@apollo/client/link/error';
 import { getStoredToken } from './auth-client';
 
 /**
- * RF-001: link de errores que detecta respuestas FORBIDDEN/UNAUTHENTICATED
+ * Link de errores que detecta respuestas FORBIDDEN/UNAUTHENTICATED
  * del backend y redirige a la pagina correspondiente.
  *
  * GraphQL siempre responde HTTP 200, asi que la unica forma de detectar
@@ -126,7 +126,7 @@ export interface MyProjectSummary {
   milestonesCompleted: number;
   budgetEnabled: boolean;
   budgetSpent: number | null;
-  /** RF-020: el proyecto esta archivado en modo solo lectura. */
+  /** El proyecto esta archivado en modo solo lectura. */
   isReadOnly: boolean;
   archivedAt: string | null;
 }

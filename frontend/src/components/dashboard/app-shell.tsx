@@ -28,7 +28,7 @@ interface AppShellProps {
 /**
  * Shell del panel (barra superior + navegacion lateral + contenido).
  *
- * RF-001: los modulos se filtran por rol con `navItemsForRole`. Los modulos
+ * Los modulos se filtran por rol con `navItemsForRole`. Los modulos
  * que aun no tienen pantalla se muestran deshabilitados (sin `href`) para
  * conservar el mapa de navegacion institucional sin romper la experiencia.
  */
@@ -130,7 +130,7 @@ export function AppShell({
 
             <div
               className="hidden shrink-0 items-center gap-2 whitespace-nowrap rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink md:flex"
-              title="El rol lo asigna la administración y no puede cambiarse desde el cliente (RF-001)."
+              title="El rol lo asigna la administración y no puede cambiarse desde el cliente."
             >
               <span aria-hidden="true" className="h-2 w-2 rounded-full bg-brand-500" />
               Rol: {ROLE_LABELS[user.role]}

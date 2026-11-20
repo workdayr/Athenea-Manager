@@ -374,6 +374,36 @@ export async function uploadProjectDocument(
                 source_ip: ip,
               },
             });
+
+            // US 3.2: la propuesta inicial abre el historial como version 1.
+            const existingVersion = await tx.proposal_Version.findUnique({
+              where: {
+                project_id_version_number: {
+                  project_id: projectId,
+                  version_number: 1,
+                },
+              },
+            });
+            if (!existingVersion) {
+              const initialVersion = await tx.proposal_Version.create({
+                data: {
+                  project_id: projectId,
+                  version_number: 1,
+                  submitted_by: user.id,
+                  status: 'Under_Review',
+                },
+              });
+              await tx.projectDocument.updateMany({
+                where: {
+                  project_id: projectId,
+                  proposal_version_id: null,
+                  doc_type: { not: 'evidence' },
+                },
+                data: {
+                  proposal_version_id: initialVersion.version_id,
+                },
+              });
+            }
           }
         }
       }

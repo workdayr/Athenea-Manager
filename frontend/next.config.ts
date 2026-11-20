@@ -5,9 +5,19 @@ import type { NextConfig } from "next";
 // BACKEND_URL=http://api:3001 (ver docker-compose.yml).
 const backendURL = process.env.BACKEND_URL ?? "http://localhost:3001";
 
+// En desarrollo, Next bloquea sus recursos (HMR, fuentes, chunks) cuando se
+// abre la app desde otra IP de la red local. Se habilitan solo los hosts
+// declarados en ALLOWED_DEV_ORIGINS (lista separada por comas); sin la
+// variable el comportamiento no cambia.
+const allowedDevOrigins = (process.env.ALLOWED_DEV_ORIGINS ?? "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 const nextConfig: NextConfig = {
   /* config options here */
   output: "standalone",
+  allowedDevOrigins,
   // Proxy: el navegador solo habla con su mismo origen
   // (http://localhost:3000/api/auth/*) y Next reenvia al backend lado
   // servidor. Asi CORS, preflights y orígenes alternos (127.0.0.1, IPs de

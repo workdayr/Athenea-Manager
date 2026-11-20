@@ -1,7 +1,7 @@
 import { gql } from '@apollo/client';
 import { getApolloClient } from './apollo-client';
 
-/** F2-04 / RF-001..RF-007: detalle integral del proyecto. */
+/** Detalle integral del proyecto. */
 
 export interface ProjectTeamMember {
   name: string;

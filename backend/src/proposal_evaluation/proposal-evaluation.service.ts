@@ -10,6 +10,7 @@ import type { AuthenticatedUser } from '../projects/session.guard.js';
 import type {
   ConflictStatus,
   EvaluationDecision,
+  ProjectStatus,
 } from '../generated/prisma/client.js';
 import {
   EVALUABLE_STATUSES,
@@ -462,6 +463,24 @@ const row = (await getProjectWithTeamForEvaluation(data.projectId)) as unknown a
         'El proyecto cambio de estado durante la operacion. Recarga e intenta de nuevo.',
         409,
       );
+    }
+    // US 3.2: el dictamen queda vinculado a la version vigente del historial.
+    const currentVersion = await tx.proposal_Version.findFirst({
+      where: { project_id: data.projectId },
+      orderBy: { version_number: 'desc' },
+      select: { version_id: true },
+    });
+    if (currentVersion) {
+      await tx.proposal_Version.update({
+        where: { version_id: currentVersion.version_id },
+        data: {
+          status: to as ProjectStatus,
+          committee_comments: data.justification.trim(),
+          evaluation_id: evaluation.evaluation_id,
+          reviewer_id: viewer.id,
+          decided_at: new Date(),
+        },
+      });
     }
     // RF-014: la notificacion y su correo entran en la misma transaccion
     // que la decision. El job de outbox los envia despues.

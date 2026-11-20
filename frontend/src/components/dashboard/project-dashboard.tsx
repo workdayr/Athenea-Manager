@@ -87,7 +87,7 @@ interface MilestoneData {
 
 /**
  * Panel de proyecto para Investigador Principal y miembros del equipo
- * (UC-009 / RF-008).
+ *
  *
  * Cada bloque declara su propio estado: proyectos, hitos y documentos. Así
  * una sección que todavía carga no se confunde con una sección vacía.

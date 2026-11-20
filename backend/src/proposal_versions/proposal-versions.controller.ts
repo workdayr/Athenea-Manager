@@ -76,7 +76,7 @@ export class ProposalVersionsController {
       }
 
       const preparedFiles = files.map((file, idx) => ({
-        docType: typesArray[idx] || 'methodology',
+        docType: typesArray[idx] ?? '',
         buffer: file.buffer,
         originalname: file.originalname,
         size: file.size,

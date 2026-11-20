@@ -42,7 +42,7 @@ const DEFAULT_SUCCESS_MS = 5_000;
 const MAX_VISIBLE = 5;
 
 /**
- * RF-014: notificaciones efimeras no bloqueantes.
+ * Notificaciones efimeras no bloqueantes.
  * - Exito/info se cierran solos a los 5 s.
  * - Error/advertencia permanecen hasta que el usuario los cierre.
  */

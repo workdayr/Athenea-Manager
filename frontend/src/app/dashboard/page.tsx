@@ -9,9 +9,9 @@ import { isInstitutionalRole } from '@/lib/dashboard';
 import { SessionLoading, useSessionUser } from '@/lib/use-session';
 
 /**
- * Punto de entrada posterior al login (UC-009 / RF-008).
+ * Punto de entrada posterior al login.
  *
- * El shell y el contenido se eligen segun el rol de plataforma (RF-001):
+ * El shell y el contenido se eligen segun el rol de plataforma:
  * - Administración, coordinación y comité -> tablero institucional.
  * - Investigador Principal y estudiantes -> panel de su proyecto.
  */

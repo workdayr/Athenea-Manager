@@ -20,7 +20,7 @@ const INVITABLE_ROLES: Array<Exclude<ProjectTeamRole, 'Principal_Investigator'>>
   ['Co_Investigator', 'Assistant'];
 
 /**
- * F2-02 / RF-011: integrantes e invitaciones del proyecto.
+ * Integrantes e invitaciones del proyecto.
  * El backend valida que solo el PI (o administracion) gestione el equipo.
  */
 export function TeamPanel({
@@ -74,7 +74,7 @@ export function TeamPanel({
     event.preventDefault();
     if (!affidavitSigned) {
       toast.error(
-        'Declara la ausencia de conflicto familiar antes de invitar (BR-010).',
+        'Declara la ausencia de conflicto familiar antes de invitar.',
       );
       return;
     }
@@ -226,7 +226,7 @@ export function TeamPanel({
             </h3>
             <p className="mt-1 text-xs text-muted">
               Solo se puede invitar como Co-investigador o Asistente. La
-              invitacion caduca en 7 dias (RF-011).
+              invitacion caduca en 7 dias.
             </p>
             {readOnly ? (
               <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
@@ -280,7 +280,7 @@ export function TeamPanel({
                   />
                   <span>
                     Declaro que no existe conflicto familiar con la persona
-                    invitada (BR-010).
+                    invitada.
                   </span>
                 </label>
                 <button

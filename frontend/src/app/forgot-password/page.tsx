@@ -11,7 +11,7 @@ import { authClient } from '@/lib/auth-client';
 import { mapAuthError } from '@/lib/auth-errors';
 
 /**
- * F1-06 / RF-010: solicitud de recuperacion de contrasena.
+ * Solicitud de recuperacion de contrasena.
  *
  * Por seguridad (anti-enumeracion) el backend responde igual exista o no
  * la cuenta; la pantalla muestra siempre el mismo mensaje de confirmacion.

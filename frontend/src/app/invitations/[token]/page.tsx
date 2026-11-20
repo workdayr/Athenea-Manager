@@ -12,7 +12,7 @@ import { acceptInvitation, teamErrorMessage } from '@/lib/teams';
 import { SessionLoading, useSessionUser } from '@/lib/use-session';
 
 /**
- * F2-02 / RF-011: aceptacion de una invitacion por token.
+ * Aceptacion de una invitacion por token.
  * El backend verifica que el correo de la sesion coincida con el invitado.
  */
 export default function InvitationPage() {

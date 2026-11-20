@@ -23,7 +23,7 @@ import {
   type MyProjectSummary,
 } from '@/lib/apollo-client';
 
-/** F2-04: acceso a los proyectos propios y su detalle. */
+/** Acceso a los proyectos propios y su detalle. */
 export default function ProjectsPage() {
   return (
     <AuthedShell

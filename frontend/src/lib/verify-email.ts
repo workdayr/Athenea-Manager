@@ -1,5 +1,5 @@
 /**
- * F1-06 / RF-010: enlace de confirmacion.
+ * Enlace de confirmacion.
  *
  * BetterAuth expone `GET /api/auth/verify-email?token=...&callbackURL=...`
  * como redireccion top-level. Se usa el proxy same-origin de Next para que
