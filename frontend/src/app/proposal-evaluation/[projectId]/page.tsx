@@ -44,9 +44,9 @@ const DECISION_HELP: Record<string, string> = {
 };
 
 /**
- * UC-003 pasos 2-6: detalle de la propuesta con equipo, alerta de
- * conflicto (BR-011, bloqueante) y formulario de decisión formal
- * con justificación obligatoria (RF-019).
+ * Pasos 2-6: detalle de la propuesta con equipo, alerta de
+ * conflicto (bloqueante) y formulario de decisión formal
+ * con justificación obligatoria.
  */
 export default function ProposalEvaluationDetailPage() {
   return (
@@ -337,7 +337,7 @@ function ProposalEvaluationDetail({ user }: { user: DashboardUser }) {
                 <p className="mt-1 text-[12.5px] leading-relaxed text-ink/90">
                   {item.justification}
                 </p>
-                {/* F1-10 / RF-019: dictamen PDF asíncrono. */}
+                {/*: dictamen PDF asíncrono. */}
                 <DecisionReportPanel evaluationId={Number(item.evaluationId)} />
               </li>
             ))}
@@ -480,7 +480,7 @@ function ProposalEvaluationDetail({ user }: { user: DashboardUser }) {
 }
 
 /**
- * F1-10 / RF-019: estado del dictamen PDF de una decisión. Consulta al
+ * estado del dictamen PDF de una decisión. Consulta al
  * servidor y reintenta cada 3 s mientras el worker lo genera; no bloquea
  * la evaluación ni el resto de la pantalla.
  */

@@ -6,11 +6,11 @@ import { useState } from 'react';
 import type { DashboardUser } from '@/lib/dashboard';
 
 /**
- * US Asistente Virtual RAG (UC-010 / RF-010).
+ * US Asistente Virtual RAG.
  *
  * Cualquier usuario autenticado puede consultar politicas institucionales
  * en lenguaje natural. La respuesta se limita a fragmentos autorizados y
- * siempre muestra citas enlazadas al documento original (AIR-001..004).
+ * siempre muestra citas enlazadas al documento original.
  */
 export default function AssistantPage() {
   const [query, setQuery] = useState('');

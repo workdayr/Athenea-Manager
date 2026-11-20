@@ -119,7 +119,7 @@ export function RegisterForm({
       );
       return;
     }
-    // F1-06 / RF-010: si la verificacion de correo es obligatoria el alta
+    // Si la verificacion de correo es obligatoria el alta
     // no crea sesion; en ese caso se lleva al usuario a /verify-email.
     const { data: sessionData } = await authClient.getSession();
     setLoading(false);
@@ -141,7 +141,7 @@ export function RegisterForm({
     setDismissed(true);
     setFormError(null);
     setGoogleLoading(true);
-    // RF-015: registro (o login, si el email ya existe) con Google
+    // Registro (o login, si el email ya existe) con Google
     // Workspace. El alta por OAuth aplica la misma politica de dominios
     // en el backend (databaseHooks); un dominio no autorizado redirige
     // aqui con ?error=unauthorized_email_domain.

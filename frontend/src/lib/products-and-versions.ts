@@ -1,6 +1,6 @@
 import { gql } from '@apollo/client';
 import { getApolloClient } from './apollo-client';
-import type { ProjectDocument } from './documents';
+import { DOC_TYPE_LABELS, type ProjectDocument, type ProjectDocumentType } from './documents';
 
 export type ProductType =
   | 'JOURNAL_ARTICLE'
@@ -34,6 +34,11 @@ export interface ResearchProduct {
   authors: ProductAuthor[];
 }
 
+export type ProposalVersionDecision =
+  | 'Approved'
+  | 'Rejected'
+  | 'Revision_Required';
+
 export interface ProposalVersion {
   versionId: string;
   projectId: number;
@@ -42,9 +47,72 @@ export interface ProposalVersion {
   submitterName: string | null;
   submittedAt: string;
   status: string;
+  decision: ProposalVersionDecision | null;
+  submitterComment: string | null;
   committeeComments: string | null;
+  decidedAt: string | null;
+  reviewerName: string | null;
   createdAt: string;
   documents: ProjectDocument[];
+}
+
+/** Motivos con los que el backend bloquea una nueva version. */
+export type ProposalVersionBlockedReason =
+  | 'NOT_PRINCIPAL_INVESTIGATOR'
+  | 'PROJECT_READ_ONLY'
+  | 'REVISION_NOT_REQUIRED'
+  | 'VERSION_LIMIT_REACHED';
+
+export interface ProposalVersionState {
+  projectId: number;
+  maxVersions: number;
+  versionsUsed: number;
+  remainingVersions: number;
+  nextVersionNumber: number;
+  canUpload: boolean;
+  blockedReason: ProposalVersionBlockedReason | null;
+}
+
+/** Tipos documentales que puede llevar una version revisada. */
+export const PROPOSAL_DOCUMENT_TYPES: ProjectDocumentType[] = [
+  'HYPOTHESIS',
+  'ABSTRACT',
+  'METHODOLOGY',
+  'RATIONALE',
+  'RESULTS',
+];
+
+/** El backend recibe los tipos en minusculas (enum DocType). */
+export function proposalDocTypeValue(docType: ProjectDocumentType): string {
+  return docType.toLowerCase();
+}
+
+export function proposalDocTypeLabel(docType: ProjectDocumentType): string {
+  return DOC_TYPE_LABELS[docType] ?? docType;
+}
+
+export const VERSION_DECISION_LABELS: Record<string, string> = {
+  Approved: 'Aprobada',
+  Rejected: 'Rechazada',
+  Revision_Required: 'Requiere correcciones',
+  Under_Review: 'En revisión',
+};
+
+export function proposalVersionBlockedMessage(
+  reason: ProposalVersionBlockedReason | null,
+): string | null {
+  switch (reason) {
+    case 'NOT_PRINCIPAL_INVESTIGATOR':
+      return 'Solo el Investigador Principal del proyecto puede subir versiones.';
+    case 'PROJECT_READ_ONLY':
+      return 'El proyecto está archivado y ya no admite cambios.';
+    case 'REVISION_NOT_REQUIRED':
+      return 'El comité todavía no ha solicitado correcciones a esta propuesta.';
+    case 'VERSION_LIMIT_REACHED':
+      return 'Se alcanzó el límite de 5 versiones para este proyecto.';
+    default:
+      return null;
+  }
 }
 
 export const PROJECT_PRODUCTS_QUERY = gql`
@@ -85,35 +153,60 @@ export const REGISTER_RESEARCH_OUTPUT_MUTATION = gql`
   }
 `;
 
+const PROPOSAL_VERSION_FIELDS = gql`
+  fragment ProposalVersionFields on ProposalVersionGql {
+    versionId
+    projectId
+    versionNumber
+    submittedBy
+    submitterName
+    submittedAt
+    status
+    decision
+    submitterComment
+    committeeComments
+    decidedAt
+    reviewerName
+    createdAt
+    documents {
+      documentId
+      projectId
+      docType
+      visibility
+      fileName
+      fileSize
+      version
+      uploadedAt
+      mandatoryReview
+      canChangeVisibility
+      reviewStatus
+      reviewedAt
+      reviewerName
+      reviewNotes
+      canReview
+    }
+  }
+`;
+
 export const PROPOSAL_VERSIONS_QUERY = gql`
+  ${PROPOSAL_VERSION_FIELDS}
   query ProposalVersions($projectId: Int!) {
     proposalVersions(projectId: $projectId) {
-      versionId
+      ...ProposalVersionFields
+    }
+  }
+`;
+
+export const PROPOSAL_VERSION_STATE_QUERY = gql`
+  query ProposalVersionState($projectId: Int!) {
+    proposalVersionState(projectId: $projectId) {
       projectId
-      versionNumber
-      submittedBy
-      submitterName
-      submittedAt
-      status
-      committeeComments
-      createdAt
-      documents {
-        documentId
-        projectId
-        docType
-        visibility
-        fileName
-        fileSize
-        version
-        uploadedAt
-        mandatoryReview
-        canChangeVisibility
-        reviewStatus
-        reviewedAt
-        reviewerName
-        reviewNotes
-        canReview
-      }
+      maxVersions
+      versionsUsed
+      remainingVersions
+      nextVersionNumber
+      canUpload
+      blockedReason
     }
   }
 `;
@@ -164,15 +257,32 @@ export async function fetchProposalVersions(
   return result.data?.proposalVersions ?? [];
 }
 
+export async function fetchProposalVersionState(
+  projectId: number,
+): Promise<ProposalVersionState> {
+  const result = await getApolloClient().query<{
+    proposalVersionState: ProposalVersionState;
+  }>({
+    query: PROPOSAL_VERSION_STATE_QUERY,
+    variables: { projectId },
+    fetchPolicy: 'network-only',
+  });
+  const state = result.data?.proposalVersionState;
+  if (!state) {
+    throw new Error('El servidor no devolvió el estado de las versiones.');
+  }
+  return state;
+}
+
 export async function uploadProposalVersion(
   projectId: number,
   comment: string,
   filesWithTypes: Array<{ file: File; docType: string }>,
 ): Promise<ProposalVersion> {
   const formData = new FormData();
-  if (comment) formData.append('comment', comment);
+  if (comment.trim()) formData.append('comment', comment.trim());
 
-  const docTypes = filesWithTypes.map((f) => f.docType);
+  const docTypes = filesWithTypes.map((item) => item.docType);
   formData.append('docTypes', JSON.stringify(docTypes));
 
   for (const item of filesWithTypes) {
@@ -188,7 +298,7 @@ export async function uploadProposalVersion(
     let msg = 'Error al subir la versión de la propuesta.';
     try {
       const body = await response.json();
-      if (body.message) msg = body.message;
+      if (typeof body.message === 'string') msg = body.message;
     } catch {}
     throw new Error(msg);
   }

@@ -37,7 +37,7 @@ const RESOLUTION_HELP: Record<string, string> = {
 };
 
 /**
- * BR-011: cola de alertas de conflicto pendientes para revisión manual
+ * Cola de alertas de conflicto pendientes para revisión manual
  * del Administrador. Cleared habilita solo a ese par
  * (proyecto, evaluador); Confirmed lo bloquea de forma permanente.
  */

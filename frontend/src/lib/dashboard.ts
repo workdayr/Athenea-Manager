@@ -2,9 +2,9 @@ import type { Route } from 'next';
 import type { IconName } from '@/components/dashboard/icons';
 
 /**
- * Modelo de datos y reglas de presentacion del dashboard (UC-009 / RF-008).
+ * Modelo de datos y reglas de presentacion del dashboard.
  *
- * El tablero institucional (RF-008) consume `coordinatorDashboard` mediante
+ * El tablero institucional consume `coordinatorDashboard` mediante
  * `@/lib/reporting`; este archivo conserva los tipos, etiquetas y utilidades
  * compartidas. La vista de proyecto consume `myProjects` y muestra estados
  * vacios cuando el usuario no tiene proyectos, sin datos de ejemplo.
@@ -56,7 +56,7 @@ export function toPlatformRole(value: unknown): PlatformRole {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Navegacion (RF-001: cada rol ve solo los modulos permitidos)               */
+/* Navegacion: cada rol ve solo los modulos permitidos */
 /* -------------------------------------------------------------------------- */
 
 export interface NavItem {
@@ -107,7 +107,7 @@ export const NAV_ITEMS: NavItem[] = [
   {
     id: 'conflictos',
     label: 'Alertas de Conflicto',
-    subtitle: 'Revisión BR-011',
+    subtitle: 'Revisión de conflictos',
     icon: 'alert',
     href: '/proposal-evaluation/conflicts',
     roles: ['ADMINISTRATOR'],
@@ -132,7 +132,7 @@ export const NAV_ITEMS: NavItem[] = [
   {
     id: 'usuarios',
     label: 'Usuarios y Roles',
-    subtitle: 'Administración de cuentas RF-001',
+    subtitle: 'Administración de cuentas',
     icon: 'users',
     href: '/admin/users',
     roles: ['ADMINISTRATOR'],
@@ -166,7 +166,7 @@ export function sidebarTitleForRole(role: PlatformRole): string {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Ciclo de vida (RF-003, RF-006, RF-007)                                     */
+/* Ciclo de vida */
 /* -------------------------------------------------------------------------- */
 
 export type LifecycleState = 'done' | 'current' | 'upcoming';
@@ -298,7 +298,7 @@ export interface InstitutionalKpi {
     percent: number;
   };
   alert?: string;
-  /** RF-001: el KPI solo se renderiza para estos roles. */
+  /** El KPI solo se renderiza para estos roles. */
   roles: PlatformRole[];
 }
 
@@ -363,7 +363,7 @@ export interface DashboardDocument {
   size: string;
   uploadedAt: string;
   visibility: 'Team_only' | 'Shared_with_administration';
-  /** Documentos reservados al PI y a la administración (RF-005). */
+  /** Documentos reservados al PI y a la administración. */
   piOnly?: boolean;
   /** US 4.1: protocolo o aprobación de ética (no puede ser privado). */
   mandatoryReview?: boolean;

@@ -7,7 +7,7 @@ import {
 } from '@/lib/assistant';
 
 /**
- * Panel de trazabilidad (AIR-003). Muestra las fuentes de la ultima
+ * Panel de trazabilidad. Muestra las fuentes de la ultima
  * respuesta fundamentada; si la respuesta fue un rechazo, explica que no
  * se uso ningun fragmento.
  */
@@ -114,7 +114,7 @@ export function SourcesPanel({
           </p>
           <p className="mt-1 text-[9.5px] leading-relaxed text-muted">
             El asistente no puede aprobar proyectos, cambiar visibilidades ni
-            modificar información oficial (AIR-002).
+            modificar información oficial.
           </p>
         </div>
       </div>

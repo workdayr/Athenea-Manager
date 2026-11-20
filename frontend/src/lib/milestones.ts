@@ -55,7 +55,7 @@ export async function confirmMilestoneEvidence(milestoneId: number) {
   return result.data?.confirmMilestone;
 }
 
-/** F2-07 / RF-006: hitos del proyecto y control de retrasos (BR-008). */
+/** Hitos del proyecto y control de retrasos. */
 
 export type MilestoneStatus = 'Pending' | 'Delayed' | 'Completed';
 

@@ -48,7 +48,7 @@ interface CallErrors {
 }
 
 /**
- * F1-09 / RF-018: creación, publicación y cierre de convocatorias.
+ * Creación, publicación y cierre de convocatorias.
  * Solo ADMINISTRATOR; el backend valida el rol, el deadline y el estado.
  */
 export default function AdminCallsPage() {

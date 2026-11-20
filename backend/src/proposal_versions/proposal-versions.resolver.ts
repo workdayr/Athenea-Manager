@@ -2,7 +2,8 @@ import { UseGuards } from '@nestjs/common';
 import { Args, Int, Query, Resolver } from '@nestjs/graphql';
 import { GraphQLError } from 'graphql';
 import { RolesGuard } from '../auth/roles.guard.js';
-import { SessionGuard } from '../projects/session.guard.js';
+import { CurrentUser } from '../projects/current-user.decorator.js';
+import { SessionGuard, type AuthenticatedUser } from '../projects/session.guard.js';
 import { ProjectReadOnlyError } from '../projects/project-write-guard.js';
 import {
   DocTypeGql,
@@ -11,10 +12,16 @@ import {
   ProjectDocumentGql,
 } from '../documents/documents.model.js';
 import { ProjectStatusGql } from '../projects/projects.model.js';
-import { ProposalVersionGql } from './proposal-versions.model.js';
+import {
+  ProposalVersionDecisionGql,
+  ProposalVersionGql,
+  ProposalVersionStateGql,
+} from './proposal-versions.model.js';
 import {
   listProposalVersions,
+  proposalVersionState,
   ProposalVersionError,
+  type ProposalVersionDocumentView,
   type ProposalVersionView,
 } from './proposal-versions.service.js';
 
@@ -30,6 +37,26 @@ function toGraphQLError(error: unknown): never {
   throw error;
 }
 
+function toDocumentGql(document: ProposalVersionDocumentView): ProjectDocumentGql {
+  const gql = new ProjectDocumentGql();
+  gql.documentId = document.documentId;
+  gql.projectId = document.projectId;
+  gql.docType = document.docType as DocTypeGql;
+  gql.visibility = document.visibility as DocumentVisibilityGql;
+  gql.fileName = document.fileName;
+  gql.fileSize = document.fileSize;
+  gql.version = document.version;
+  gql.uploadedAt = document.uploadedAt;
+  gql.mandatoryReview = document.mandatoryReview;
+  gql.canChangeVisibility = document.canChangeVisibility;
+  gql.reviewStatus = document.reviewStatus as DocumentReviewStatusGql;
+  gql.reviewedAt = document.reviewedAt;
+  gql.reviewerName = document.reviewerName;
+  gql.reviewNotes = document.reviewNotes;
+  gql.canReview = document.canReview;
+  return gql;
+}
+
 function toProposalVersionGql(view: ProposalVersionView): ProposalVersionGql {
   const gql = new ProposalVersionGql();
   gql.versionId = view.versionId;
@@ -39,27 +66,13 @@ function toProposalVersionGql(view: ProposalVersionView): ProposalVersionGql {
   gql.submitterName = view.submitterName;
   gql.submittedAt = view.submittedAt;
   gql.status = view.status as ProjectStatusGql;
+  gql.decision = (view.decision as ProposalVersionDecisionGql | null) ?? null;
+  gql.submitterComment = view.submitterComment;
   gql.committeeComments = view.committeeComments;
+  gql.decidedAt = view.decidedAt;
+  gql.reviewerName = view.reviewerName;
   gql.createdAt = view.createdAt;
-  gql.documents = view.documents.map((d) => {
-    const docGql = new ProjectDocumentGql();
-    docGql.documentId = d.documentId;
-    docGql.projectId = d.projectId;
-    docGql.docType = d.docType as DocTypeGql;
-    docGql.visibility = d.visibility as DocumentVisibilityGql;
-    docGql.fileName = d.fileName;
-    docGql.fileSize = d.fileSize;
-    docGql.version = d.version;
-    docGql.uploadedAt = d.uploadedAt;
-    docGql.mandatoryReview = d.mandatoryReview;
-    docGql.canChangeVisibility = d.canChangeVisibility;
-    docGql.reviewStatus = d.reviewStatus as DocumentReviewStatusGql;
-    docGql.reviewedAt = d.reviewedAt;
-    docGql.reviewerName = d.reviewerName;
-    docGql.reviewNotes = d.reviewNotes;
-    docGql.canReview = d.canReview;
-    return docGql;
-  });
+  gql.documents = view.documents.map(toDocumentGql);
   return gql;
 }
 
@@ -69,10 +82,32 @@ export class ProposalVersionsResolver {
   @Query(() => [ProposalVersionGql])
   async proposalVersions(
     @Args('projectId', { type: () => Int }) projectId: number,
+    @CurrentUser() user: AuthenticatedUser,
   ): Promise<ProposalVersionGql[]> {
     try {
-      const views = await listProposalVersions(projectId);
+      const views = await listProposalVersions(user, projectId);
       return views.map(toProposalVersionGql);
+    } catch (error) {
+      toGraphQLError(error);
+    }
+  }
+
+  @Query(() => ProposalVersionStateGql)
+  async proposalVersionState(
+    @Args('projectId', { type: () => Int }) projectId: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<ProposalVersionStateGql> {
+    try {
+      const state = await proposalVersionState(user, projectId);
+      const gql = new ProposalVersionStateGql();
+      gql.projectId = state.projectId;
+      gql.maxVersions = state.maxVersions;
+      gql.versionsUsed = state.versionsUsed;
+      gql.remainingVersions = state.remainingVersions;
+      gql.nextVersionNumber = state.nextVersionNumber;
+      gql.canUpload = state.canUpload;
+      gql.blockedReason = state.blockedReason;
+      return gql;
     } catch (error) {
       toGraphQLError(error);
     }

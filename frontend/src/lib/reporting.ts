@@ -13,7 +13,7 @@ import {
 } from './dashboard';
 
 /**
- * Operaciones y mapeo del dashboard institucional (RF-008 / UC-009).
+ * Operaciones y mapeo del dashboard institucional.
  *
  * El backend calcula los KPI y aplica paginacion del lado del servidor con
  * cache de 15 minutos; este modulo solo transforma la respuesta GraphQL al
@@ -87,7 +87,7 @@ export const COORDINATOR_DASHBOARD_QUERY = gql`
   }
 `;
 
-/** F2-05 / RF-008: descarga del reporte exportado por el servidor. */
+/** Descarga del reporte exportado por el servidor. */
 export type ReportExportFormat = 'csv' | 'pdf';
 
 export function reportExportQuery(
@@ -244,7 +244,7 @@ function statusChips(metrics: DashboardMetrics) {
 }
 
 /**
- * RF-001 / RF-008: construye las tarjetas KPI segun el rol.
+ * Construye las tarjetas KPI segun el rol.
  *
  * Coordinacion y administracion ven el presupuesto ejercido; el Comite no
  * (el backend devuelve `spent = null`), por lo que en su lugar se muestra el
@@ -287,7 +287,7 @@ export function buildDashboardKpis(
       icon: 'alert',
       alert:
         metrics.productivity.milestonesDelayed > 0
-          ? 'Alerta automatizada (Cron > 7 días, RF-006). Revisa el seguimiento de hitos.'
+          ? 'Alerta automatizada (Cron > 7 días). Revisa el seguimiento de hitos.'
           : undefined,
       roles: ['ADMINISTRATOR', 'COORDINATOR', 'COMMITTEE'],
     },
@@ -357,7 +357,7 @@ export interface StatusShare {
   barClassName: string;
 }
 
-/** RF-008: distribucion porcentual del inventario por estado actual. */
+/** Distribucion porcentual del inventario por estado actual. */
 export function statusShares(metrics: DashboardMetrics): StatusShare[] {
   const total = metrics.totalProjects;
   if (total <= 0) {

@@ -1,7 +1,7 @@
 import { gql } from '@apollo/client';
 import { getApolloClient } from './apollo-client';
 
-/** F2-01 / RF-012: busqueda interna de proyectos, convocatorias y usuarios. */
+/** Busqueda interna de proyectos, convocatorias y usuarios. */
 
 export type SearchResultType = 'PROJECT' | 'CALL' | 'USER';
 

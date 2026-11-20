@@ -20,7 +20,7 @@ import {
 } from '@/lib/calls';
 
 /**
- * F1-09 / RF-018: listado de convocatorias institucionales.
+ * Listado de convocatorias institucionales.
  * Muestra las vigentes (con cupo restante) y el historial de cerradas.
  */
 export default function CallsPage() {

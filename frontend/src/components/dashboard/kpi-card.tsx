@@ -3,7 +3,7 @@ import { ProgressBar } from '@/components/ui/progress';
 import type { InstitutionalKpi } from '@/lib/dashboard';
 
 /**
- * Tarjeta KPI del tablero institucional (RF-008).
+ * Tarjeta KPI del tablero institucional.
  * `risk` usa el tono de peligro del sistema (no un rojo suelto).
  */
 export function KpiCard({ kpi }: { kpi: InstitutionalKpi }) {

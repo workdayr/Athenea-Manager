@@ -1,7 +1,7 @@
 import type { Route } from 'next';
 
 /**
- * Contrato del Asistente Virtual RAG (UC-010 / RF-010 / AIR-001..005).
+ * Contrato del Asistente Virtual RAG.
  *
  * La UI solo depende de `AssistantGateway`. Mientras el backend RAG no
  * exista, se usa `mockAssistantGateway` con un pequeno corpus de ejemplo.
@@ -156,7 +156,7 @@ export function createAssistantMessage(answer: AssistantAnswer): AssistantMessag
   };
 }
 
-/** Enlace interno al documento citado (AIR-003). */
+/** Enlace interno al documento citado. */
 export function citationHref(citation: AssistantCitation): Route {
   return `/projects/${citation.projectId}/documents#document-${citation.documentId}` as Route;
 }

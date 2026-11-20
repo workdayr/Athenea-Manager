@@ -16,7 +16,7 @@ const STATE_LABELS = {
 } as const;
 
 /**
- * Embudo del ciclo de vida (RF-003). En el tablero institucional cada
+ * Embudo del ciclo de vida. En el tablero institucional cada
  * etapa filtra la tabla de seguimiento; en la vista de proyecto marca
  * avance, etapa actual y etapas pendientes.
  */

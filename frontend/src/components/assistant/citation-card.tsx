@@ -7,7 +7,7 @@ import {
 } from '@/lib/assistant';
 
 /**
- * Tarjeta de fuente (AIR-003): titulo, ubicacion, fragmento y enlace
+ * Tarjeta de fuente: titulo, ubicacion, fragmento y enlace
  * directo al documento interno. El id permite que los marcadores [n]
  * del mensaje desplacen la vista hasta aqui.
  */

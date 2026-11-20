@@ -1,7 +1,7 @@
 import { VerifyEmailForm } from './verify-email-form';
 
 /**
- * F1-06 / RF-010: confirmacion de correo y reenvio del enlace.
+ * Confirmacion de correo y reenvio del enlace.
  * El token y el estado llegan como query params; se leen en el servidor
  * y se pasan al formulario cliente.
  */

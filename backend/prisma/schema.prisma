@@ -70,6 +70,7 @@ model User {
   documentReviews           ProjectDocument[]           @relation("DocumentReviewer")
   // Sprint 3 (F1-03 y F1-04): versiones de propuesta y productos de investigacion.
   submittedProposalVersions Proposal_Version[]          @relation("ProposalVersionSubmitter")
+  reviewedProposalVersions  Proposal_Version[]          @relation("ProposalVersionReviewer")
   authoredProducts          Product_Author[]
 
   @@unique([email])
@@ -443,16 +444,27 @@ model Proposal_Version {
   submitted_by       String
   submitted_at       DateTime      @default(now()) @db.Timestamp()
   status             ProjectStatus @default(Under_Review)
+  // Comentario con el que el PI acompana la version.
+  submitter_comment  String?       @db.Text
+  // Observaciones del comite que motivaron esta version.
   committee_comments String?       @db.Text
+  // Dictamen que resuelve esta version (una evaluacion pertenece a una sola
+  // version, por eso es unico).
+  evaluation_id      Int?          @unique
+  reviewer_id        String?
+  decided_at         DateTime?     @db.Timestamp()
   created_at         DateTime      @default(now()) @db.Timestamp()
 
   project            Project           @relation(fields: [project_id], references: [project_id], onDelete: Cascade, onUpdate: Cascade)
   submitter          User              @relation("ProposalVersionSubmitter", fields: [submitted_by], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  reviewer           User?             @relation("ProposalVersionReviewer", fields: [reviewer_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  evaluation         Proposal_Evaluation? @relation(fields: [evaluation_id], references: [evaluation_id], onDelete: SetNull, onUpdate: Cascade)
   documents          ProjectDocument[]
 
   @@unique([project_id, version_number])
   @@index([project_id, created_at])
   @@index([submitted_by])
+  @@index([reviewer_id])
 }
 
 model Expense {
@@ -519,6 +531,8 @@ model Proposal_Evaluation {
   @@index([created_at])
   // F1-10 / RF-019: dictamen PDF generado de forma asincrona.
   report Decision_Report?
+  // US 3.2: version de propuesta que resolvio esta evaluacion.
+  proposalVersion Proposal_Version?
 }
 
 /**

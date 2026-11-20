@@ -8,6 +8,7 @@ import { Icon } from '@/components/dashboard/icons';
 import { MilestonesPanel } from '@/components/projects/milestones-panel';
 import { TeamPanel } from '@/components/projects/team-panel';
 import { Alert } from '@/components/ui/alert';
+import { Badge, type BadgeTone } from '@/components/ui/badge';
 import { BackLink, Breadcrumbs } from '@/components/ui/breadcrumbs';
 import { ButtonLink } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -29,6 +30,11 @@ import {
   type ProjectHistoryEntry,
 } from '@/lib/projects';
 import { fetchTeamMembers, PROJECT_ROLE_LABELS } from '@/lib/teams';
+import {
+  fetchProposalVersions,
+  VERSION_DECISION_LABELS,
+  type ProposalVersion,
+} from '@/lib/products-and-versions';
 
 type Tab = 'resumen' | 'equipo' | 'hitos' | 'documentos' | 'historial';
 
@@ -39,6 +45,13 @@ const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'documentos', label: 'Documentos y productos' },
   { id: 'historial', label: 'Historial' },
 ];
+
+const DECISION_TONES: Record<string, BadgeTone> = {
+  Approved: 'success',
+  Rejected: 'danger',
+  Revision_Required: 'warning',
+  Under_Review: 'info',
+};
 
 export default function ProjectDetailPage() {
   return (
@@ -66,6 +79,8 @@ function ProjectDetailContent({ user }: { user: DashboardUser }) {
   const [history, setHistory] = useState<ProjectHistoryEntry[] | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyAttempt, setHistoryAttempt] = useState(0);
+  const [versions, setVersions] = useState<ProposalVersion[] | null>(null);
+  const [versionsError, setVersionsError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!validProjectId) {
@@ -120,6 +135,27 @@ function ProjectDetailContent({ user }: { user: DashboardUser }) {
     };
   }, [tab, projectId, history, validProjectId, historyAttempt]);
 
+  useEffect(() => {
+    if (tab !== 'historial' || !validProjectId || versions !== null) {
+      return;
+    }
+    let active = true;
+    fetchProposalVersions(projectId)
+      .then((rows) => {
+        if (active) {
+          setVersions(rows);
+        }
+      })
+      .catch((loadError: unknown) => {
+        if (active) {
+          setVersionsError(projectErrorMessage(loadError));
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [tab, projectId, versions, validProjectId]);
+
   if (!validProjectId) {
     return (
       <div className="space-y-6">
@@ -171,6 +207,21 @@ function ProjectDetailContent({ user }: { user: DashboardUser }) {
           (project.milestonesCompleted / project.milestonesTotal) * 100,
         )
       : 0;
+  const timeline = [
+    ...(history ?? []).map((entry) => ({
+      kind: 'status' as const,
+      date: entry.createdAt,
+      entry,
+    })),
+    ...(versions ?? []).map((version) => ({
+      kind: 'version' as const,
+      date: version.submittedAt,
+      version,
+    })),
+  ].sort(
+    (left, right) => new Date(right.date).getTime() - new Date(left.date).getTime(),
+  );
+  const timelineReady = history !== null && versions !== null;
 
   return (
     <div className="space-y-5">
@@ -405,8 +456,12 @@ function ProjectDetailContent({ user }: { user: DashboardUser }) {
           <section className="overflow-hidden rounded-xl border border-line bg-white">
             <header className="border-b border-line px-5 py-3">
               <h2 className="text-sm font-semibold text-ink">
-                Historial de estados
+                Línea de tiempo del proyecto
               </h2>
+              <p className="mt-0.5 text-xs text-muted">
+                Versiones de la propuesta y cambios de estado, de lo más reciente
+                a lo más antiguo.
+              </p>
             </header>
 
             {historyError && (
@@ -423,7 +478,15 @@ function ProjectDetailContent({ user }: { user: DashboardUser }) {
               </div>
             )}
 
-            {!historyError && history === null && (
+            {!historyError && versionsError && (
+              <div className="p-5">
+                <Alert tone="warning" title="Versiones no disponibles">
+                  {versionsError}
+                </Alert>
+              </div>
+            )}
+
+            {!historyError && !timelineReady && (
               <div aria-busy="true" className="space-y-4 px-5 py-5">
                 <span className="sr-only">Cargando historial…</span>
                 {[0, 1, 2].map((index) => (
@@ -435,40 +498,93 @@ function ProjectDetailContent({ user }: { user: DashboardUser }) {
               </div>
             )}
 
-            {history && history.length === 0 && (
+            {timelineReady && timeline.length === 0 && (
               <EmptyState
                 compact
                 className="m-5"
-                title="Sin transiciones registradas"
-                description="El proyecto todavía no registra cambios de estado en su ciclo de vida."
+                title="Sin eventos registrados"
+                description="El proyecto todavía no registra versiones ni cambios de estado en su ciclo de vida."
               />
             )}
 
-            {history && history.length > 0 && (
+            {timelineReady && timeline.length > 0 && (
               <ol className="divide-y divide-line">
-                {history.map((entry) => (
-                  <li key={entry.transitionId} className="px-5 py-4">
-                    <div className="flex flex-wrap items-center gap-2 text-sm">
-                      <span className="font-medium text-ink">
-                        {STATUS_LABELS[entry.fromStatus] ?? entry.fromStatus}
-                      </span>
-                      <Icon
-                        name="chevronRight"
-                        className="h-3 w-3 text-line-strong"
-                      />
-                      <span className="font-semibold text-brand-800">
-                        {STATUS_LABELS[entry.toStatus] ?? entry.toStatus}
-                      </span>
-                      <span className="ml-auto text-xs text-muted">
-                        {formatDate(entry.createdAt)}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-xs text-muted">
-                      Por {entry.actorName}
-                      {entry.justification ? ` · ${entry.justification}` : ''}
-                    </p>
-                  </li>
-                ))}
+                {timeline.map((event) =>
+                  event.kind === 'status' ? (
+                    <li key={`status-${event.entry.transitionId}`} className="px-5 py-4">
+                      <div className="flex flex-wrap items-center gap-2 text-sm">
+                        <span className="font-medium text-ink">
+                          {STATUS_LABELS[event.entry.fromStatus] ??
+                            event.entry.fromStatus}
+                        </span>
+                        <Icon
+                          name="chevronRight"
+                          className="h-3 w-3 text-line-strong"
+                        />
+                        <span className="font-semibold text-brand-800">
+                          {STATUS_LABELS[event.entry.toStatus] ??
+                            event.entry.toStatus}
+                        </span>
+                        <span className="ml-auto text-xs text-muted">
+                          {formatDate(event.entry.createdAt)}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-muted">
+                        Por {event.entry.actorName}
+                        {event.entry.justification
+                          ? ` · ${event.entry.justification}`
+                          : ''}
+                      </p>
+                    </li>
+                  ) : (
+                    <li key={`version-${event.version.versionId}`} className="px-5 py-4">
+                      <div className="flex flex-wrap items-center gap-2 text-sm">
+                        <span className="font-semibold text-ink">
+                          Versión {event.version.versionNumber} enviada
+                        </span>
+                        <Badge
+                          tone={
+                            DECISION_TONES[
+                              event.version.decision ?? event.version.status
+                            ] ?? 'info'
+                          }
+                        >
+                          {VERSION_DECISION_LABELS[
+                            event.version.decision ?? event.version.status
+                          ] ??
+                            event.version.decision ??
+                            event.version.status}
+                        </Badge>
+                        <span className="ml-auto text-xs text-muted">
+                          {formatDate(event.version.submittedAt)}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-muted">
+                        Por {event.version.submitterName ?? 'el equipo'}
+                        {event.version.documents.length > 0
+                          ? ` · ${event.version.documents.length} documento${
+                              event.version.documents.length === 1 ? '' : 's'
+                            }`
+                          : ''}
+                        {event.version.decidedAt
+                          ? ` · dictamen del ${formatDate(event.version.decidedAt)}`
+                          : ''}
+                      </p>
+                      {event.version.submitterComment && (
+                        <p className="mt-2 text-xs leading-relaxed text-ink">
+                          <span className="font-semibold">Equipo: </span>
+                          {event.version.submitterComment}
+                        </p>
+                      )}
+                      {event.version.committeeComments && (
+                        <p className="mt-1 text-xs leading-relaxed text-muted">
+                          <span className="font-semibold">Comité: </span>
+                          {event.version.committeeComments}
+                        </p>
+                      )}
+                    </li>
+                  ),
+                )}
               </ol>
             )}
           </section>

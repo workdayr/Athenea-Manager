@@ -1,5 +1,5 @@
 /**
- * US 4.1 / RF-005: consulta y configuracion de la visibilidad de los
+ * Consulta y configuracion de la visibilidad de los
  * documentos del proyecto.
  *
  * El backend aplica las reglas de negocio (documentos de revision
@@ -24,7 +24,7 @@ export type ProjectDocumentType =
   | 'ETHICS_APPROVAL'
   | 'EVIDENCE';
 
-/** F1-11 / BR-003: estado de revision administrativa. */
+/** Estado de revision administrativa. */
 export type DocumentReviewStatus = 'Pending' | 'Approved' | 'Rejected';
 
 export const REVIEW_STATUS_LABELS: Record<DocumentReviewStatus, string> = {
@@ -51,7 +51,7 @@ export interface ProjectDocument {
   canReview: boolean;
 }
 
-/** F1-11: datos eticos del proyecto para la certificacion BR-012. */
+/** Datos eticos del proyecto para la certificacion. */
 export interface ProjectEthicsInfo {
   projectId: string;
   researchInvolvesHumans: boolean;
@@ -243,7 +243,7 @@ export const CERTIFY_PROJECT_ANONYMIZATION_MUTATION = gql`
 `;
 
 /**
- * F1-11 / BR-003: aprueba o rechaza el informe final o la aprobacion de
+ * Aprueba o rechaza el informe final o la aprobacion de
  * etica. Solo Administracion y Coordinacion.
  */
 export async function reviewProjectDocument(
@@ -265,7 +265,7 @@ export async function reviewProjectDocument(
   return updated;
 }
 
-/** F1-11: consulta las banderas eticas y el estado de certificacion. */
+/** Consulta las banderas eticas y el estado de certificacion. */
 export async function fetchProjectEthics(
   projectId: number,
 ): Promise<ProjectEthicsInfo> {
@@ -283,7 +283,7 @@ export async function fetchProjectEthics(
   return project;
 }
 
-/** F1-11 / BR-012: el PI certifica la anonimizacion de los datasets. */
+/** El PI certifica la anonimizacion de los datasets. */
 export async function certifyProjectAnonymization(
   projectId: number,
 ): Promise<{ certified: boolean; certifiedAt: string }> {
@@ -316,7 +316,7 @@ export function visibilityErrorMessage(error: unknown): string {
   return 'No se pudo actualizar la visibilidad. Intenta de nuevo.';
 }
 
-/** Mensaje legible para errores de revision o certificacion (F1-11). */
+/** Mensaje legible para errores de revision o certificacion. */
 export function documentActionErrorMessage(error: unknown): string {
   const graphQLError = (
     error as {
@@ -333,7 +333,7 @@ export function documentActionErrorMessage(error: unknown): string {
 }
 
 /**
- * F1-05 / RNF-005: Descarga protegida de documentos con token firmado temporal.
+ * Descarga protegida de documentos con token firmado temporal.
  */
 export async function downloadProjectDocument(documentId: number): Promise<void> {
   const response = await fetch(`/api/documents/${documentId}/download`, {

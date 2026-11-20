@@ -39,7 +39,7 @@ const EMPTY_FILTERS: AdminUserFilters = {
 };
 
 /**
- * F1-07 / RF-001: gestión de usuarios y roles (solo ADMINISTRATOR).
+ * Gestión de usuarios y roles (solo ADMINISTRATOR).
  * El rol nunca se autoasigna desde el cliente: esta pantalla exige sesión
  * administrativa y el backend vuelve a validar rol, último administrador
  * y auditoría.

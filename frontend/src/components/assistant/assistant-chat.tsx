@@ -24,12 +24,12 @@ import { MessageList } from './message-list';
 import { SourcesPanel } from './sources-panel';
 
 /**
- * Asistente Virtual RAG (UC-010 / RF-010).
+ * Asistente Virtual RAG.
  *
  * La pantalla no conoce detalles del modelo ni del indice: solo habla con
  * `AssistantGateway`. El contexto se filtra por rol en el backend real;
  * aqui el indicador de alcance y el historial local reproducen la misma
- * experiencia (AIR-001..005).
+ * experiencia.
  */
 export function AssistantChat({
   user,
@@ -601,7 +601,7 @@ function Welcome({
 
       <p className="mt-4 text-[9.5px] leading-relaxed text-muted">
         Tu rol actual es <strong className="text-ink">{roleLabel}</strong>. El
-        asistente filtra el contenido con tus permisos (AIR-004).
+        asistente filtra el contenido con tus permisos.
       </p>
     </div>
   );

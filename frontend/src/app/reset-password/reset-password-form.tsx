@@ -20,7 +20,7 @@ interface Errors {
 }
 
 /**
- * F1-06 / RF-010: fija la nueva contrasena con el token de un solo uso.
+ * Fija la nueva contrasena con el token de un solo uso.
  * El backend hace cumplir la vigencia de 30 minutos.
  */
 export function ResetPasswordForm({

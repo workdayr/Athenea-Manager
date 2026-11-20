@@ -1,7 +1,7 @@
 import { RegisterForm } from './register-form';
 
 /**
- * Pagina de registro (RF-010, RF-015). Server Component: lee `?error=`
+ * Pagina de registro. Server Component: lee `?error=`
  * del callback OAuth en el servidor y lo pasa por props al formulario.
  * Asi el HTML del servidor y el primer render del cliente son identicos
  * (sin hydration mismatch; mismo patron que en login).
