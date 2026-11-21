@@ -32,6 +32,12 @@ services:
   api:
     env_file: !override
       - ./backend/.env.prod
+    # El compose base fuerza SMTP_HOST=mailpit en `environment:`, que gana
+    # sobre el env_file. Para enviar correo real hay que sobrescribirlo aca.
+    environment:
+      SMTP_HOST: smtp.hostinger.com
+      SMTP_PORT: "465"
+      SMTP_SECURE: "true"
     ports: !override
       - "127.0.0.1:3005:3001"
     volumes:
@@ -39,10 +45,6 @@ services:
       # UPLOAD_DIR sigue siendo /app/uploads: las rutas absolutas guardadas
       # en projectDocument.file_url no cambian.
       - ./data/uploads:/app/uploads
-    environment:
-      SMTP_HOST: smtp.hostinger.com
-      SMTP_PORT: "465"
-      SMTP_SECURE: "true"        # 465 = SSL directo. Con 587 poné "false"
 
   web:
     ports: !override
