@@ -1,0 +1,52 @@
+# Override para correr en la PC de casa y publicar por Cloudflare Tunnel.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# - Los uploads salen del volumen Docker y pasan a una carpeta real de Windows.
+# - Nada escucha en la red local: todo queda en loopback y el tunel es la
+#   unica puerta de entrada.
+# - `!override` / `!reset` son necesarios porque Compose SUMA los `ports` en
+#   vez de reemplazarlos; sin eso intenta bindear el mismo puerto dos veces.
+
+services:
+  # En la base solo api y web tienen restart; sin esto, al reiniciar Docker
+  # (o la PC) los contenedores de infraestructura se quedan apagados y el
+  # stack no vuelve solo.
+  clamav:
+    restart: unless-stopped
+    # No se publica: el api lo alcanza por la red interna (clamav:3310).
+    ports: !reset []
+    volumes:
+      # Persistir las firmas: sin esto, cada recreacion vuelve a descargar
+      # ~180 MB y el healthcheck tarda minutos.
+      - clamdb:/var/lib/clamav
+  postgres:
+    restart: unless-stopped
+    ports: !reset []
+  mailpit:
+    restart: unless-stopped
+    # UI de Mailpit solo en loopback, para revisar correos capturados.
+    ports: !override
+      - "127.0.0.1:8025:8025"
+
+  api:
+    env_file: !override
+      - ./backend/.env.prod
+    ports: !override
+      - "127.0.0.1:3005:3001"
+    volumes:
+      # Reemplaza el volumen nombrado `uploads` por una carpeta del host.
+      # UPLOAD_DIR sigue siendo /app/uploads: las rutas absolutas guardadas
+      # en projectDocument.file_url no cambian.
+      - ./data/uploads:/app/uploads
+    environment:
+      SMTP_HOST: smtp.hostinger.com
+      SMTP_PORT: "465"
+      SMTP_SECURE: "true"        # 465 = SSL directo. Con 587 poné "false"
+
+  web:
+    ports: !override
+      - "127.0.0.1:3009:3000"
+
+volumes:
+  clamdb:

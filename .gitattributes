@@ -1,0 +1,5 @@
+# Los archivos de configuracion que consume Linux dentro de Docker deben
+# quedarse en LF. Con CRLF, clamd falla con
+# "Incorrect argument format for option ..." y el contenedor queda unhealthy.
+*.conf text eol=lf
+docker/**/*.sh text eol=lf

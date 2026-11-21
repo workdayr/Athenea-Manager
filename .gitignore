@@ -101,3 +101,8 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 # F1-08: respaldos locales (nunca versionar)
 backups/
+
+# Documentos subidos via web (bind mount de docker-compose.prod.yml)
+/data/
+# Entorno de produccion local (nunca versionar)
+backend/.env.prod

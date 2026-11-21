@@ -10,6 +10,11 @@ RUN pnpm install --frozen-lockfile
 
 # ---------- Build ----------
 FROM base AS build
+# Los `rewrites()` de next.config.ts se evaluan en BUILD time y quedan
+# horneados en el standalone. Sin esto el proxy /api/* apunta a
+# http://localhost:3001 dentro del contenedor y devuelve 500.
+ARG BACKEND_URL=http://api:3001
+ENV BACKEND_URL=${BACKEND_URL}
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
