@@ -10,18 +10,24 @@ import { Button } from '@/components/ui/button';
 import { ROLE_LABELS, type DashboardUser } from '@/lib/dashboard';
 import {
   SUGGESTED_PROMPTS,
+  configureAssistantGateway,
   createAssistantMessage,
   createUserMessage,
   getAssistantGateway,
   isAssistantDemo,
   type AssistantMessage,
 } from '@/lib/assistant';
+import { liveAssistantGateway } from '@/lib/assistant-live';
 import { useAssistantHistory } from '@/lib/assistant-history';
 import { AssistantAvatar } from './assistant-avatar';
 import { Composer } from './composer';
 import { HistorySidebar } from './history-sidebar';
 import { MessageList } from './message-list';
 import { SourcesPanel } from './sources-panel';
+
+// El asistente de esta pantalla consulta el RAG real (Ollama + ai-service).
+// Al registrarlo aqui, la insignia "Modo Demo" desaparece.
+configureAssistantGateway(liveAssistantGateway);
 
 /**
  * Asistente Virtual RAG.

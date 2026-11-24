@@ -106,3 +106,14 @@ backups/
 /data/
 # Entorno de produccion local (nunca versionar)
 backend/.env.prod
+
+# ==========================================
+# PYTHON (ai-service)
+# ==========================================
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+ai-service/.venv/
+ai-service/.env

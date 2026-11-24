@@ -40,16 +40,18 @@ export type RefusalReason =
 
 export interface AssistantCitation {
   id: string;
-  /** Proyecto al que pertenece el documento indexado. */
-  projectId: number;
-  /** Id del documento para enlazar al expediente interno. */
-  documentId: number;
+  /** Proyecto del documento; ausente en documentos institucionales. */
+  projectId?: number;
+  /** UUID de `Document` o id de `ProjectDocument`. */
+  documentId: string | number;
   documentTitle: string;
   documentType: string;
   section?: string;
   page?: number;
   /** Fragmento textual usado para fundamentar la respuesta. */
   excerpt: string;
+  /** Enlace explícito cuando el backend ya conoce la ruta destino. */
+  href?: string;
 }
 
 export interface AssistantHistoryMessage {
@@ -156,9 +158,20 @@ export function createAssistantMessage(answer: AssistantAnswer): AssistantMessag
   };
 }
 
-/** Enlace interno al documento citado. */
+/**
+ * Enlace interno al documento citado.
+ *
+ * - Documento de proyecto: expediente del proyecto.
+ * - Documento institucional (sin proyecto): búsqueda interna por título.
+ */
 export function citationHref(citation: AssistantCitation): Route {
-  return `/projects/${citation.projectId}/documents#document-${citation.documentId}` as Route;
+  if (citation.href) {
+    return citation.href as Route;
+  }
+  if (typeof citation.projectId === 'number') {
+    return `/projects/${citation.projectId}/documents#document-${citation.documentId}` as Route;
+  }
+  return `/search?q=${encodeURIComponent(citation.documentTitle)}` as Route;
 }
 
 export function citationLocation(citation: AssistantCitation): string {

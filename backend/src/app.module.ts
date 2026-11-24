@@ -5,6 +5,7 @@ import { AdminModule } from './admin/admin.module.js';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { ArchiveModule } from './archive/archive.module.js';
+import { AssistantModule } from './assistant/assistant.module.js';
 import { AuditModule } from './audit/audit.module.js';
 import { CallsModule } from './calls/calls.module.js';
 import { DocumentUploadModule } from './document_upload/document-upload.module.js';
@@ -53,6 +54,7 @@ import { TeamsModule } from './teams/teams.module.js';
     ProposalVersionsModule,
     SearchModule,
     TeamsModule,
+    AssistantModule,
   ],
   controllers: [AppController],
   providers: [AppService],

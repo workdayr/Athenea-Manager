@@ -41,10 +41,11 @@ services:
     ports: !override
       - "127.0.0.1:3005:3001"
     volumes:
-      # Reemplaza el volumen nombrado `uploads` por una carpeta del host.
+      # Reemplaza el volumen nombrado `uploads` por una carpeta real de D:.
       # UPLOAD_DIR sigue siendo /app/uploads: las rutas absolutas guardadas
-      # en projectDocument.file_url no cambian.
-      - ./data/uploads:/app/uploads
+      # en projectDocument.file_url no cambian. El ai-service nativo lee la
+      # misma carpeta con AI_UPLOAD_DIR=D:/Athenea/uploads.
+      - D:/Athenea/uploads:/app/uploads
 
   web:
     ports: !override
