@@ -141,9 +141,13 @@ export function AssistantChat({
       if (requestError instanceof Error && requestError.name === 'AbortError') {
         return;
       }
-      setError(
-        'No se pudo obtener una respuesta del asistente. Revisa tu conexión e intenta de nuevo.',
-      );
+      // El gateway ya traduce timeouts y errores del servicio a un mensaje
+      // legible; aqui solo se conserva para no perder el motivo real.
+      const description =
+        requestError instanceof Error && requestError.message.trim()
+          ? requestError.message
+          : 'No se pudo obtener una respuesta del asistente. Intenta de nuevo.';
+      setError(description);
       setRetryQuestion(question);
     } finally {
       if (abortRef.current === controller) {

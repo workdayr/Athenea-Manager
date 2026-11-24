@@ -74,6 +74,67 @@ function abortError(): Error {
   return error;
 }
 
+const GENERIC_ERROR =
+  'No se pudo consultar al asistente. Intenta de nuevo.';
+const NETWORK_TIMEOUT_ERROR =
+  'La respuesta tardó demasiado y se cortó la conexión. Intenta de nuevo.';
+const NETWORK_ERROR =
+  'No se pudo contactar al servidor del asistente. Verifica que el backend y el servicio de IA estén activos.';
+
+/** Mensajes por código para cuando el servidor no envía texto propio. */
+const ERROR_MESSAGES: Record<string, string> = {
+  AI_SERVICE_TIMEOUT: NETWORK_TIMEOUT_ERROR,
+  AI_SERVICE_UNAVAILABLE:
+    'El asistente no está disponible en este momento. Intenta de nuevo en unos segundos.',
+  AI_NOT_CONFIGURED: 'El asistente no está configurado en este entorno.',
+  UNAUTHENTICATED: 'Tu sesión expiró. Vuelve a iniciar sesión.',
+  FORBIDDEN: 'Tu rol no tiene permiso para consultar al asistente.',
+};
+
+/**
+ * Traduce el error de Apollo (GraphQL o red) a un mensaje legible.
+ *
+ * Sin esto, cualquier fallo terminaba en "revisa tu conexión", aunque el
+ * problema real fuera un timeout, el servicio de IA caído o un corte del
+ * proxy de Next a los 30s.
+ */
+function describeAssistantError(error: unknown): Error {
+  const candidate = error as {
+    graphQLErrors?: ReadonlyArray<{
+      message?: string;
+      extensions?: { code?: string };
+    }>;
+    networkError?: unknown;
+    message?: string;
+  };
+
+  const graphQLErrors = candidate?.graphQLErrors;
+  if (graphQLErrors && graphQLErrors.length > 0) {
+    const first = graphQLErrors[0];
+    const code = first.extensions?.code;
+    const message = first.message?.trim() || (code ? ERROR_MESSAGES[code] : undefined);
+    return new Error(message || GENERIC_ERROR);
+  }
+
+  if (candidate?.networkError) {
+    const detail =
+      candidate.networkError instanceof Error
+        ? candidate.networkError.message
+        : String(candidate.networkError);
+    if (
+      /abort|aborted|timeout|ETIMEDOUT|ECONNRESET|socket hang up|fetch failed|failed to fetch/i.test(
+        detail,
+      )
+    ) {
+      return new Error(NETWORK_TIMEOUT_ERROR);
+    }
+    return new Error(NETWORK_ERROR);
+  }
+
+  const message = candidate?.message?.trim();
+  return new Error(message || GENERIC_ERROR);
+}
+
 export const liveAssistantGateway: AssistantGateway = {
   async ask(input, signal) {
     const client = getApolloClient();
@@ -124,12 +185,13 @@ export const liveAssistantGateway: AssistantGateway = {
         createdAt: answer.createdAt,
       } satisfies AssistantAnswer;
     } catch (error) {
-      if (signal?.aborted) {
+      if (
+        signal?.aborted ||
+        (error instanceof Error && error.name === 'AbortError')
+      ) {
         throw abortError();
       }
-      throw error instanceof Error
-        ? error
-        : new Error('No se pudo consultar al asistente.');
+      throw describeAssistantError(error);
     }
   },
 };

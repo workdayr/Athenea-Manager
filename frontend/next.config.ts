@@ -18,6 +18,14 @@ const nextConfig: NextConfig = {
   /* config options here */
   output: "standalone",
   allowedDevOrigins,
+  experimental: {
+    // El proxy de `rewrites()` corta las peticiones a los 30s por defecto.
+    // `askAssistant` es sincrono (espera a Ollama) y tarda ~40s, asi que el
+    // navegador recibia ECONNRESET ("socket hang up") en vez de la respuesta.
+    // Se deja por encima del timeout del backend (AI_REQUEST_TIMEOUT_MS=90s)
+    // para que, si el RAG falla, llegue su mensaje GraphQL y no un corte de red.
+    proxyTimeout: 120_000,
+  },
   // Proxy: el navegador solo habla con su mismo origen
   // (http://localhost:3000/api/auth/*) y Next reenvia al backend lado
   // servidor. Asi CORS, preflights y orígenes alternos (127.0.0.1, IPs de
